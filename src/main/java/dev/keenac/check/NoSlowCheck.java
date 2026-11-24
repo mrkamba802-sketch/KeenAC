@@ -27,6 +27,7 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, UseData> usingItems = new HashMap<>();
     private final Map<UUID, Integer> violations = new HashMap<>();
     private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
+    private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -93,7 +94,8 @@ public final class NoSlowCheck implements Listener {
             plugin.getAlertManager().send("NoSlow", player, vl);
             data.samples = 0;
             if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && vl >= 3) {
-                data.flagged = true;
+                Material used = getTrackedItemType(player);
+                if (used != null) pendingConsumeCancellation.put(id, used);
             }
         }
     }
@@ -101,23 +103,27 @@ public final class NoSlowCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onConsume(PlayerItemConsumeEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        UseData data = usingItems.remove(id);
-        if (data != null && data.flagged) {
+        Material pendingType = pendingConsumeCancellation.remove(id);
+        if (pendingType != null && event.getItem().getType() == pendingType
+                && plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) {
             event.setCancelled(true);
             event.getPlayer().clearActiveItem();
         }
+        usingItems.remove(id);
     }
 
     public void clear(UUID id) {
         usingItems.remove(id);
         violations.remove(id);
         lastViolationNanos.remove(id);
+        pendingConsumeCancellation.remove(id);
     }
 
     public void clearAll() {
         usingItems.clear();
         violations.clear();
         lastViolationNanos.clear();
+        pendingConsumeCancellation.clear();
     }
 
     private void decayViolations() {
@@ -138,6 +144,13 @@ public final class NoSlowCheck implements Listener {
                 lastViolationNanos.put(id, now);
             }
         }
+    }
+
+    private Material getTrackedItemType(Player player) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (isTrackedConsumable(main)) return main.getType();
+        ItemStack off = player.getInventory().getItemInOffHand();
+        return isTrackedConsumable(off) ? off.getType() : null;
     }
 
     private boolean isTrackedConsumable(ItemStack item) {
