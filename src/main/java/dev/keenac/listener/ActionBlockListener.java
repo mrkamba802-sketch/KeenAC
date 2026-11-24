@@ -26,7 +26,7 @@ public final class ActionBlockListener implements Listener {
 
     private final AirStuckCheck check;
 
-    public ActionBlockListener(Object plugin, AirStuckCheck check) {
+    public ActionBlockListener(AirStuckCheck check) {
         this.check = check;
     }
 
