@@ -3,9 +3,14 @@ version: '${version}'
 main: dev.keenac.KeenAC
 api-version: '1.21'
 authors: [MrKamba, Its_Ronex]
-description: AirStuck detection powered by PacketEvents.
+description: AirStuck and WallHit detection powered by PacketEvents.
 depend: [packetevents]
+commands:
+  keenac:
+    description: KeenAC commands
+    usage: /keenac <alerts|reload>
+    aliases: [kac]
 permissions:
-  keenac.alerts:
-    description: Receives KeenAC detection alerts.
+  keenac.reload:
+    description: Allows reloading KeenAC configuration.
     default: op
