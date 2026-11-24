@@ -31,6 +31,9 @@ public final class KeenAC extends JavaPlugin {
 
         saveDefaultConfig();
         alertManager = new AlertManager(this);
+        for (org.bukkit.entity.Player online : Bukkit.getOnlinePlayers()) {
+            alertManager.enableForStaff(online);
+        }
         airStuckCheck = new AirStuckCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
