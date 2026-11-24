@@ -1,6 +1,7 @@
 package dev.keenac.check;
 
 import dev.keenac.KeenAC;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -14,7 +15,6 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.attribute.Attribute;
-import org.bukkit.util.Vector;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -26,9 +26,11 @@ public final class NoSlowCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, UseData> usingItems = new HashMap<>();
     private final Map<UUID, Integer> violations = new HashMap<>();
+    private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
+        Bukkit.getScheduler().runTaskTimer(plugin, this::decayViolations, 20L, 20L);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -87,6 +89,7 @@ public final class NoSlowCheck implements Listener {
         int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 5));
         if (data.samples >= required) {
             int vl = violations.merge(id, 1, Integer::sum);
+            lastViolationNanos.put(id, System.nanoTime());
             plugin.getAlertManager().send("NoSlow", player, vl);
             data.samples = 0;
             if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && vl >= 3) {
@@ -108,11 +111,33 @@ public final class NoSlowCheck implements Listener {
     public void clear(UUID id) {
         usingItems.remove(id);
         violations.remove(id);
+        lastViolationNanos.remove(id);
     }
 
     public void clearAll() {
         usingItems.clear();
         violations.clear();
+        lastViolationNanos.clear();
+    }
+
+    private void decayViolations() {
+        long now = System.nanoTime();
+        Iterator<Map.Entry<UUID, Integer>> iterator = violations.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, Integer> entry = iterator.next();
+            UUID id = entry.getKey();
+            long lastViolation = lastViolationNanos.getOrDefault(id, now);
+            if (now - lastViolation < 20_000_000_000L) continue;
+
+            int reducedVl = entry.getValue() - 1;
+            if (reducedVl <= 0) {
+                iterator.remove();
+                lastViolationNanos.remove(id);
+            } else {
+                entry.setValue(reducedVl);
+                lastViolationNanos.put(id, now);
+            }
+        }
     }
 
     private boolean isTrackedConsumable(ItemStack item) {
