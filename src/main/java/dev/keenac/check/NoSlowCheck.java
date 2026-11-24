@@ -28,6 +28,7 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, Integer> violations = new HashMap<>();
     private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
     private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
+    private final Map<UUID, Long> lastCancellationAlertNanos = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -118,6 +119,7 @@ public final class NoSlowCheck implements Listener {
         violations.remove(id);
         lastViolationNanos.remove(id);
         pendingConsumeCancellation.remove(id);
+        lastCancellationAlertNanos.remove(id);
     }
 
     public void clearAll() {
@@ -125,14 +127,19 @@ public final class NoSlowCheck implements Listener {
         violations.clear();
         lastViolationNanos.clear();
         pendingConsumeCancellation.clear();
+        lastCancellationAlertNanos.clear();
     }
 
     private void interruptFlaggedUse() {
+        if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)
+                || !plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) return;
         Iterator<Map.Entry<UUID, Material>> iterator = pendingConsumeCancellation.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<UUID, Material> entry = iterator.next();
             Player player = Bukkit.getPlayer(entry.getKey());
+            UUID id = entry.getKey();
             if (player == null || !player.isOnline()) {
+                lastCancellationAlertNanos.remove(id);
                 iterator.remove();
                 continue;
             }
@@ -140,11 +147,19 @@ public final class NoSlowCheck implements Listener {
             boolean stillHolding = player.getInventory().getItemInMainHand().getType() == tracked
                     || player.getInventory().getItemInOffHand().getType() == tracked;
             if (!stillHolding) {
+                lastCancellationAlertNanos.remove(id);
                 iterator.remove();
                 continue;
             }
             if (player.isHandRaised()) {
                 player.clearActiveItem();
+                long now = System.nanoTime();
+                long lastAlert = lastCancellationAlertNanos.getOrDefault(id, 0L);
+                if (now - lastAlert >= 2_000_000_000L) {
+                    int vl = violations.getOrDefault(id, 0);
+                    plugin.getAlertManager().send("NoSlow", player, vl);
+                    lastCancellationAlertNanos.put(id, now);
+                }
             }
         }
     }
