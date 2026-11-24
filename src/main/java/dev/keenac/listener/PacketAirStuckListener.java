@@ -7,7 +7,6 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import dev.keenac.KeenAC;
 import dev.keenac.check.AirStuckCheck;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
 /**
@@ -43,7 +42,7 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             return;
         }
 
-        Location packetLocation = movement.getLocation();
+        com.github.retrooper.packetevents.protocol.world.Location packetLocation = movement.getLocation();
         if (packetLocation == null) {
             return;
         }
