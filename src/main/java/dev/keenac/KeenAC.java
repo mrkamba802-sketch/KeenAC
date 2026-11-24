@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.WallHitCheck;
+import dev.keenac.check.NoSlowCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -41,6 +42,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
+        Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
 
         KeenACCommand executor = new KeenACCommand(this);
         getCommand("keenac").setExecutor(executor);
