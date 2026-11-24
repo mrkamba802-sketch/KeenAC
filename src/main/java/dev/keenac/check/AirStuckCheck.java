@@ -5,8 +5,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.util.BoundingBox;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -18,6 +20,7 @@ public final class AirStuckCheck {
     private static final String ALERT_PERMISSION = "keenac.alerts";
     private static final String ALERT_FORMAT =
             "&bKeenAC &8» &f%s &7failed &eAirStuck &8(VL: %d)";
+    private static final double SUPPORT_EPSILON = 0.06;
 
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
@@ -56,7 +59,6 @@ public final class AirStuckCheck {
         if (isExemptMovementState(player)) {
             state.worldId = player.getWorld().getUID();
             state.anchor = player.getLocation().clone();
-            state.stationaryTicks = 0;
             clearSuspicion(state);
             return;
         }
@@ -65,7 +67,6 @@ public final class AirStuckCheck {
         if (!state.worldId.equals(current.getWorld().getUID())) {
             state.worldId = current.getWorld().getUID();
             state.anchor = current.clone();
-            state.stationaryTicks = 0;
             clearSuspicion(state);
             return;
         }
@@ -80,9 +81,8 @@ public final class AirStuckCheck {
         boolean hasVelocity = player.getVelocity().lengthSquared()
                 > velocityTolerance * velocityTolerance;
 
-        if (player.isOnGround() || moved || hasVelocity) {
+        if (hasSolidSupport(player) || moved || hasVelocity) {
             state.anchor = current.clone();
-            state.stationaryTicks = 0;
             clearSuspicion(state);
             return;
         }
@@ -91,13 +91,6 @@ public final class AirStuckCheck {
 
         int requiredTicks = Math.max(1,
                 plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 10));
-
-        if (plugin.getConfig().getBoolean("checks.air-stuck.ping-compensation.enabled", true)) {
-            int maxExtraTicks = Math.max(0,
-                    plugin.getConfig().getInt("checks.air-stuck.ping-compensation.max-extra-ticks", 40));
-            int pingExtraTicks = Math.max(0, player.getPing()) / 50;
-            requiredTicks += Math.min(maxExtraTicks, pingExtraTicks);
-        }
 
         if (state.stationaryTicks >= requiredTicks) {
             flag(player, state);
@@ -111,12 +104,12 @@ public final class AirStuckCheck {
         }
 
         if (player.getGameMode() == GameMode.SPECTATOR
-                || player.getAllowFlight()
                 || player.isFlying()
                 || player.isInsideVehicle()
                 || player.isGliding()
                 || player.isSwimming()
                 || player.isClimbing()
+                || player.isRiptiding()
                 || player.isInWater()
                 || player.isInLava()
                 || player.isSleeping()) {
@@ -125,6 +118,48 @@ public final class AirStuckCheck {
 
         return player.hasPotionEffect(PotionEffectType.LEVITATION)
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
+    }
+
+    /**
+     * Uses server-side collision geometry instead of Player#isOnGround(), which is
+     * client-controlled and documented as unreliable for anti-cheat checks.
+     */
+    private boolean hasSolidSupport(Player player) {
+        BoundingBox playerBox = player.getBoundingBox();
+        double feetY = playerBox.getMinY();
+
+        double minX = playerBox.getMinX() + 0.01;
+        double maxX = playerBox.getMaxX() - 0.01;
+        double minZ = playerBox.getMinZ() + 0.01;
+        double maxZ = playerBox.getMaxZ() - 0.01;
+
+        BoundingBox footProbe = new BoundingBox(
+                minX, feetY - SUPPORT_EPSILON, minZ,
+                maxX, feetY + 0.001, maxZ
+        );
+
+        int minBlockX = floor(footProbe.getMinX());
+        int maxBlockX = floor(footProbe.getMaxX());
+        int minBlockY = floor(footProbe.getMinY());
+        int maxBlockY = floor(footProbe.getMaxY());
+        int minBlockZ = floor(footProbe.getMinZ());
+        int maxBlockZ = floor(footProbe.getMaxZ());
+
+        for (int x = minBlockX; x <= maxBlockX; x++) {
+            for (int y = minBlockY; y <= maxBlockY; y++) {
+                for (int z = minBlockZ; z <= maxBlockZ; z++) {
+                    Block block = player.getWorld().getBlockAt(x, y, z);
+                    if (block.getCollisionShape().overlaps(footProbe)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private int floor(double value) {
+        return (int) Math.floor(value);
     }
 
     private void flag(Player player, PlayerState state) {
