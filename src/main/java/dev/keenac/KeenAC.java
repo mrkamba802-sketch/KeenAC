@@ -18,11 +18,11 @@ public final class KeenAC extends JavaPlugin {
 
         airStuckCheck = new AirStuckCheck(this);
         Bukkit.getPluginManager().registerEvents(
-                new ActionBlockListener(this, airStuckCheck), this);
+                new ActionBlockListener(airStuckCheck), this);
         Bukkit.getPluginManager().registerEvents(
                 new PlayerLifecycleListener(airStuckCheck), this);
 
-        // The check uses the main server thread and samples each online player once per tick.
+        // Sample online players once per server tick on the main thread.
         tickTask = Bukkit.getScheduler().runTaskTimer(
                 this, airStuckCheck::tick, 1L, 1L);
 
