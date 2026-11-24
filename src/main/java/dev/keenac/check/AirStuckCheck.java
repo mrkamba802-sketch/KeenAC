@@ -96,15 +96,12 @@ public final class AirStuckCheck {
 
         double movementTolerance = Math.max(0.001,
                 plugin.getConfig().getDouble("checks.air-stuck.movement-tolerance", 0.02));
-        double velocityTolerance = Math.max(0.001,
-                plugin.getConfig().getDouble("checks.air-stuck.velocity-tolerance", 0.02));
-
         boolean moved = state.anchor.distanceSquared(current)
                 > movementTolerance * movementTolerance;
-        boolean hasVelocity = player.getVelocity().lengthSquared()
-                > velocityTolerance * velocityTolerance;
-
-        if (hasSolidSupport(player) || moved || hasVelocity) {
+        // Server-side velocity can remain non-zero even when a client-side
+        // movement cheat keeps the player suspended in exactly the same spot.
+        // Actual packet displacement, not velocity alone, proves movement.
+        if (hasSolidSupport(player) || moved) {
             state.anchor = current.clone();
             clearSuspicion(state);
             return;
