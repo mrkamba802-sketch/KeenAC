@@ -3,7 +3,6 @@ package dev.keenac.alert;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
 import java.util.HashSet;
@@ -27,6 +26,16 @@ public final class AlertManager {
         return true;
     }
 
+    public void enableForStaff(Player player) {
+        if (player.hasPermission("keenac.alerts")) {
+            enabled.add(player.getUniqueId());
+        }
+    }
+
+    public boolean isEnabled(Player player) {
+        return enabled.contains(player.getUniqueId());
+    }
+
     public void send(String checkName, Player suspect, int violationLevel) {
         String format = plugin.getConfig().getString(
                 "alerts.format",
@@ -36,7 +45,8 @@ public final class AlertManager {
 
         Bukkit.getConsoleSender().sendMessage(message);
         for (Player recipient : Bukkit.getOnlinePlayers()) {
-            if (enabled.contains(recipient.getUniqueId())) {
+            if (enabled.contains(recipient.getUniqueId())
+                    && recipient.hasPermission("keenac.alerts")) {
                 recipient.sendMessage(message);
             }
         }
