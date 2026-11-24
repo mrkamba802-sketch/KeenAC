@@ -4,8 +4,9 @@ Lightweight AirStuck detection for Paper and Purpur servers.
 
 ## Compatibility
 
-- Paper / Purpur 1.21.4 and newer, including 26.x builds that retain the Bukkit/Paper API used by this plugin.
-- Java 21 bytecode. Run 26.x servers with the Java version required by that server (Java 25 for current 26.x Paper builds).
+- Compiled against the Paper 1.21.4 API and Java 21 bytecode.
+- Uses the shared Bukkit/Paper API surface and is intended for Paper / Purpur 1.21.4 and newer.
+- Run 26.x servers with the Java version required by that server (Java 25 for current Paper 26.3 builds).
 
 ## Build
 
@@ -15,7 +16,9 @@ A GitHub Actions workflow builds the JAR on each push and publishes it as a work
 
 ## Detection
 
-AirStuck reports a player who remains effectively motionless in mid-air for the configured number of ticks. Detection is reset by movement, landing, teleportation, world changes, or exempt movement states. A suspected player has relevant gameplay interactions cancelled until the suspicion clears.
+AirStuck reports a player who remains effectively motionless and unsupported by block collision geometry for the configured number of **server ticks**. Bukkit/Paper does not expose a reliable per-player client-tick counter through this API, so this implementation does not claim to measure raw client ticks.
+
+Detection is reset by movement, landing, teleportation, world changes, or exempt movement states. A suspected player has common gameplay interactions cancelled until the suspicion clears.
 
 Alerts use the format `&bKeenAC &8» &f<player> &7failed &eAirStuck &8(VL: <level>)` and are rate-limited to one per player every 3 seconds.
 
