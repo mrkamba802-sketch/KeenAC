@@ -1,15 +1,11 @@
 checks:
   air-stuck:
     enabled: true
-    # Minimum still-in-air time, counted in server ticks (20 ticks = 1 second).
+    # Still-in-air threshold, counted in server ticks (20 ticks = 1 second).
     stationary-ticks: 10
     # Movement and velocity must both stay below these thresholds.
     movement-tolerance: 0.02
     velocity-tolerance: 0.02
-    # Adds grace ticks based on ping to reduce false positives during lag.
-    ping-compensation:
-      enabled: true
-      max-extra-ticks: 40
     # Cancel normal gameplay actions while a player is flagged.
     cancel-actions: true
 
