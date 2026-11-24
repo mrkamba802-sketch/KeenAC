@@ -2,7 +2,6 @@ package dev.keenac.check;
 
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
@@ -17,9 +16,6 @@ import java.util.UUID;
 
 public final class AirStuckCheck {
 
-    private static final String ALERT_PERMISSION = "keenac.alerts";
-    private static final String ALERT_FORMAT =
-            "&bKeenAC &8» &f%s &7failed &eAirStuck &8(VL: %d)";
     private static final double SUPPORT_EPSILON = 0.06;
 
     private final KeenAC plugin;
@@ -192,7 +188,7 @@ public final class AirStuckCheck {
             return;
         }
 
-        long cooldownTicks = Math.max(3L,
+        long cooldownTicks = Math.max(0L,
                 plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 20L;
 
         if (state.hasAlerted && serverTick - state.lastAlertTick < cooldownTicks) {
@@ -203,9 +199,6 @@ public final class AirStuckCheck {
         if (state.alertedDuringCurrentFlag) {
             state.violationLevel++;
         }
-
-        String message = ChatColor.translateAlternateColorCodes('&',
-                String.format(ALERT_FORMAT, player.getName(), state.violationLevel));
 
         plugin.getAlertManager().send("AirStuck", player, state.violationLevel);
 
