@@ -25,7 +25,7 @@ alerts:
   console: true
   # Supports legacy & color codes and placeholders:
   # {prefix}, {player}, {check}, {vl}
-  format: "{prefix} &f{player} &7failed &e{check} &8(VL: {vl})"
+  format: "{prefix} &f{player} &7failed &c{check} &8(x{vl})"
   prefix: "&bKeenAC &8»"
 
   # Automatically enable alert reception for players with keenac.alerts permission.
