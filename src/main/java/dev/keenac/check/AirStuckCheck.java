@@ -98,10 +98,11 @@ public final class AirStuckCheck {
                 plugin.getConfig().getDouble("checks.air-stuck.movement-tolerance", 0.02));
         boolean moved = state.anchor.distanceSquared(current)
                 > movementTolerance * movementTolerance;
-        // Server-side velocity can remain non-zero even when a client-side
-        // movement cheat keeps the player suspended in exactly the same spot.
-        // Actual packet displacement, not velocity alone, proves movement.
-        if (hasSolidSupport(player) || moved) {
+
+        // Grounded players must never be evaluated by AirStuck. isOnGround()
+        // covers ordinary standing/walking; the collision probe is a fallback
+        // for server implementations where the ground flag is briefly stale.
+        if (player.isOnGround() || hasSolidSupport(player) || moved) {
             state.anchor = current.clone();
             clearSuspicion(state);
             return;
