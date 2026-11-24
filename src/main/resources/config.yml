@@ -16,6 +16,15 @@ checks:
     # Cancel attacks when the target cannot be seen through blocks.
     cancel-hits: true
 
+  no-slow:
+    enabled: true
+    # Consecutive suspicious movement samples required before an alert.
+    required-samples: 5
+    # Cancel item consumption after a confirmed violation.
+    cancel-consume: true
+    potion-effects: true
+    block-friction: true
+
 alerts:
   enabled: true
   # Minimum delay between alerts for the same player and check.
