@@ -1,0 +1,10 @@
+name: KeenAC
+version: '${version}'
+main: dev.keenac.KeenAC
+api-version: '1.21'
+authors: [MrKamba, Its_Ronex]
+description: Lightweight AirStuck detection for Paper and Purpur.
+permissions:
+  keenac.alerts:
+    description: Receives KeenAC detection alerts.
+    default: op
