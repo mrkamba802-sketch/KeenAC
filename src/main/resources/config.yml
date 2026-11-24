@@ -1,13 +1,38 @@
+# KeenAC configuration
+# All distances are measured in blocks; time values are in seconds or server ticks as noted.
+
 checks:
   air-stuck:
     enabled: true
+    # Number of consecutive server ticks without valid movement before flagging.
     stationary-ticks: 10
     movement-tolerance: 0.02
     velocity-tolerance: 0.02
+    # Cancel interactions/actions while the player is flagged.
     cancel-actions: true
+
   wall-hit:
     enabled: true
+    # Cancel attacks when the target cannot be seen through blocks.
+    cancel-hits: true
 
 alerts:
+  enabled: true
+  # Minimum delay between alerts for the same player and check.
+  # Set to 3 to use the originally requested three-second interval.
   delay-seconds: 3
-  format: "&bKeenAC &8» &f%s &7failed &e%s &8(VL: %d)"
+  # Send alerts to console as well as opted-in staff.
+  console: true
+  # Supports legacy & color codes and placeholders:
+  # {prefix}, {player}, {check}, {vl}
+  format: "{prefix} &f{player} &7failed &e{check} &8(VL: {vl})"
+  prefix: "&bKeenAC &8»"
+
+  # Automatically enable alert reception for players with keenac.alerts permission.
+  auto-enable-for-staff: true
+
+commands:
+  # Permission nodes are also declared in plugin.yml.
+  use-permission: "keenac.use"
+  alerts-permission: "keenac.alerts"
+  reload-permission: "keenac.reload"
