@@ -7,10 +7,17 @@ description: AirStuck and WallHit detection powered by PacketEvents.
 depend: [packetevents]
 commands:
   keenac:
-    description: KeenAC commands
+    description: KeenAC administration commands
     usage: /keenac <alerts|reload>
     aliases: [kac]
+    permission: keenac.use
 permissions:
+  keenac.use:
+    description: Allows access to KeenAC commands.
+    default: op
+  keenac.alerts:
+    description: Allows receiving and toggling KeenAC alerts.
+    default: op
   keenac.reload:
     description: Allows reloading KeenAC configuration.
     default: op
