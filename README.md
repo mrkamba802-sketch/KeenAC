@@ -1,25 +1,31 @@
 # KeenAC
 
-Lightweight AirStuck detection for Paper and Purpur servers.
+AirStuck detection for Paper and Purpur powered by PacketEvents.
+
+## Dependencies
+
+- PacketEvents 2.x is a required server plugin (hard dependency).
+- Gradle compiles against PacketEvents Spigot module 2.14.0 with `compileOnly`; PacketEvents is not shaded into KeenAC.
+- Install PacketEvents separately in the server's `plugins` folder before KeenAC.
 
 ## Compatibility
 
 - Compiled against the Paper 1.21.4 API and Java 21 bytecode.
-- Uses the shared Bukkit/Paper API surface and is intended for Paper / Purpur 1.21.4 and newer.
-- Run 26.x servers with the Java version required by that server (Java 25 for current Paper 26.3 builds).
+- Intended for Paper / Purpur 1.21.4 and newer, with PacketEvents 2.x supporting the target protocol versions.
+- Use the Java runtime required by your server version.
 
 ## Build
 
-Run `gradle build` with JDK 21. The plugin JAR is written to `build/libs/KeenAC-1.0.0.jar`.
+Run `gradle build` with JDK 21. The plugin JAR is written to `build/libs/KeenAC-1.1.0.jar`.
 
-A GitHub Actions workflow builds the JAR on each push and publishes it as a workflow artifact.
+GitHub Actions builds the JAR on each push and publishes it as a workflow artifact.
 
 ## Detection
 
-AirStuck reports a player who remains effectively motionless and unsupported by block collision geometry for the configured number of **server ticks**. Bukkit/Paper does not expose a reliable per-player client-tick counter through this API, so this implementation does not claim to measure raw client ticks.
+AirStuck position samples are decoded from incoming client movement packets through PacketEvents. Bukkit's main thread evaluates server-side collision support and advances the stationary-in-air counter. Client-provided on-ground flags are not trusted as proof of support.
 
-Detection is reset by movement, landing, teleportation, world changes, or exempt movement states. A suspected player has common gameplay interactions cancelled until the suspicion clears.
+Detection resets on movement, landing, teleportation, world changes, and exempt movement states. A suspected player has common gameplay interactions cancelled until the suspicion clears.
 
-Alerts use the format `&bKeenAC &8» &f<player> &7failed &eAirStuck &8(VL: <level>)` and are rate-limited to one per player every 3 seconds.
+Alerts use `&bKeenAC &8» &f<player> &7failed &eAirStuck &8(VL: <level>)`, rate-limited to one per player every 3 seconds.
 
 Operators are not exempt from checks. The `keenac.alerts` permission controls who receives alerts; it does not bypass detection.
