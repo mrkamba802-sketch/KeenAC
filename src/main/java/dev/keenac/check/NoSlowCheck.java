@@ -50,6 +50,10 @@ public final class NoSlowCheck implements Listener {
         UUID id = player.getUniqueId();
         UseData data = usingItems.get(id);
         if (data == null) return;
+        if (!player.isHandRaised()) {
+            usingItems.remove(id);
+            return;
+        }
 
         long elapsedNanos = System.nanoTime() - data.lastSampleNanos;
         if (elapsedNanos < 35_000_000L) return;
@@ -123,9 +127,6 @@ public final class NoSlowCheck implements Listener {
                 || player.isInWater() || player.isClimbing()
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
                 || player.hasPotionEffect(PotionEffectType.LEVITATION)) return true;
-        if (plugin.getConfig().getBoolean("checks.no-slow.potion-effects", true)
-                && (player.hasPotionEffect(PotionEffectType.SPEED)
-                || player.hasPotionEffect(PotionEffectType.SLOWNESS))) return true;
         if (!plugin.getConfig().getBoolean("checks.no-slow.block-friction", true)) return false;
         Material under = block.getRelative(0, -1, 0).getType();
         return under == Material.ICE || under == Material.PACKED_ICE
