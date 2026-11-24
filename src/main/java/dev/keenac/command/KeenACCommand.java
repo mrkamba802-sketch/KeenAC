@@ -13,24 +13,20 @@ import java.util.List;
 
 public final class KeenACCommand implements CommandExecutor, TabCompleter {
     private final KeenAC plugin;
+    public KeenACCommand(KeenAC plugin) { this.plugin = plugin; }
 
-    public KeenACCommand(KeenAC plugin) {
-        this.plugin = plugin;
+    private String permission(String path, String fallback) {
+        return plugin.getConfig().getString(path, fallback);
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length != 1) {
-            if (sender.hasPermission("keenac.alerts") || sender.hasPermission("keenac.reload")) {
-                sender.sendMessage(color("&bKeenAC &8» &fИспользование: &e/keenac <alerts|reload>"));
-            } else {
-                sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
-            }
+            sender.sendMessage(color("&bKeenAC &8» &fИспользование: &e/keenac <alerts|reload>"));
             return true;
         }
-
         if (args[0].equalsIgnoreCase("alerts")) {
-            if (!sender.hasPermission("keenac.alerts")) {
+            if (!sender.hasPermission(permission("commands.alerts-permission", "keenac.alerts"))) {
                 sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
                 return true;
             }
@@ -39,13 +35,11 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
             boolean enabled = plugin.getAlertManager().toggle(player);
-            sender.sendMessage(color("&bKeenAC &8» &fАлерты: "
-                    + (enabled ? "&aвключены" : "&cвыключены")));
+            sender.sendMessage(color("&bKeenAC &8» &fАлерты: " + (enabled ? "&aвключены" : "&cвыключены")));
             return true;
         }
-
         if (args[0].equalsIgnoreCase("reload")) {
-            if (!sender.hasPermission("keenac.reload")) {
+            if (!sender.hasPermission(permission("commands.reload-permission", "keenac.reload"))) {
                 sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
                 return true;
             }
@@ -54,7 +48,6 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
             plugin.getLogger().info(sender.getName() + " reloaded the configuration.");
             return true;
         }
-
         sender.sendMessage(color("&bKeenAC &8» &cНеизвестная команда."));
         return true;
     }
@@ -62,15 +55,10 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length != 1) return List.of();
-
         List<String> suggestions = new ArrayList<>();
         String prefix = args[0].toLowerCase();
-        if (sender.hasPermission("keenac.alerts") && "alerts".startsWith(prefix)) {
-            suggestions.add("alerts");
-        }
-        if (sender.hasPermission("keenac.reload") && "reload".startsWith(prefix)) {
-            suggestions.add("reload");
-        }
+        if (sender.hasPermission(permission("commands.alerts-permission", "keenac.alerts")) && "alerts".startsWith(prefix)) suggestions.add("alerts");
+        if (sender.hasPermission(permission("commands.reload-permission", "keenac.reload")) && "reload".startsWith(prefix)) suggestions.add("reload");
         return suggestions;
     }
 
