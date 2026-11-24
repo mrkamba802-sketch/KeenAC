@@ -10,7 +10,6 @@ commands:
     description: KeenAC administration commands
     usage: /keenac <alerts|reload>
     aliases: [kac]
-    permission: keenac.use
 permissions:
   keenac.use:
     description: Allows access to KeenAC commands.
