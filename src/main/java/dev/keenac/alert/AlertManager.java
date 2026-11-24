@@ -19,15 +19,15 @@ public final class AlertManager {
 
     public boolean toggle(Player player) {
         UUID id = player.getUniqueId();
-        if (enabled.remove(id)) {
-            return false;
-        }
+        if (enabled.remove(id)) return false;
         enabled.add(id);
         return true;
     }
 
     public void enableForStaff(Player player) {
-        if (player.hasPermission("keenac.alerts")) {
+        if (plugin.getConfig().getBoolean("alerts.auto-enable-for-staff", true)
+                && player.hasPermission(plugin.getConfig().getString(
+                        "commands.alerts-permission", "keenac.alerts"))) {
             enabled.add(player.getUniqueId());
         }
     }
@@ -37,26 +37,31 @@ public final class AlertManager {
     }
 
     public void send(String checkName, Player suspect, int violationLevel) {
-        String format = plugin.getConfig().getString(
-                "alerts.format",
-                "&bKeenAC &8» &f%s &7failed &e%s &8(VL: %d)");
-        String message = ChatColor.translateAlternateColorCodes('&',
-                String.format(format, suspect.getName(), checkName, violationLevel));
+        if (!plugin.getConfig().getBoolean("alerts.enabled", true)) return;
 
-        Bukkit.getConsoleSender().sendMessage(message);
+        String prefix = plugin.getConfig().getString("alerts.prefix", "&bKeenAC &8»");
+        String format = plugin.getConfig().getString(
+                "alerts.format", "{prefix} &f{player} &7failed &e{check} &8(VL: {vl})");
+        String message = format
+                .replace("{prefix}", prefix)
+                .replace("{player}", suspect.getName())
+                .replace("{check}", checkName)
+                .replace("{vl}", Integer.toString(violationLevel));
+        message = ChatColor.translateAlternateColorCodes('&', message);
+
+        if (plugin.getConfig().getBoolean("alerts.console", true)) {
+            Bukkit.getConsoleSender().sendMessage(message);
+        }
+        String permission = plugin.getConfig().getString(
+                "commands.alerts-permission", "keenac.alerts");
         for (Player recipient : Bukkit.getOnlinePlayers()) {
             if (enabled.contains(recipient.getUniqueId())
-                    && recipient.hasPermission("keenac.alerts")) {
+                    && recipient.hasPermission(permission)) {
                 recipient.sendMessage(message);
             }
         }
     }
 
-    public void clear(Player player) {
-        enabled.remove(player.getUniqueId());
-    }
-
-    public void clearAll() {
-        enabled.clear();
-    }
+    public void clear(Player player) { enabled.remove(player.getUniqueId()); }
+    public void clearAll() { enabled.clear(); }
 }
