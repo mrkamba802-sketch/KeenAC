@@ -8,6 +8,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public final class KeenACCommand implements CommandExecutor, TabCompleter {
@@ -20,11 +21,19 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length != 1) {
-            sender.sendMessage(color("&bKeenAC &8» &fИспользование: &e/keenac <alerts|reload>"));
+            if (sender.hasPermission("keenac.alerts") || sender.hasPermission("keenac.reload")) {
+                sender.sendMessage(color("&bKeenAC &8» &fИспользование: &e/keenac <alerts|reload>"));
+            } else {
+                sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
+            }
             return true;
         }
 
         if (args[0].equalsIgnoreCase("alerts")) {
+            if (!sender.hasPermission("keenac.alerts")) {
+                sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
+                return true;
+            }
             if (!(sender instanceof Player player)) {
                 sender.sendMessage(color("&bKeenAC &8» &cЭта команда доступна только игроку."));
                 return true;
@@ -46,18 +55,23 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        sender.sendMessage(color("&bKeenAC &8» &fИспользование: &e/keenac <alerts|reload>"));
+        sender.sendMessage(color("&bKeenAC &8» &cНеизвестная команда."));
         return true;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
-            return List.of("alerts", "reload").stream()
-                    .filter(s -> s.startsWith(args[0].toLowerCase()))
-                    .toList();
+        if (args.length != 1) return List.of();
+
+        List<String> suggestions = new ArrayList<>();
+        String prefix = args[0].toLowerCase();
+        if (sender.hasPermission("keenac.alerts") && "alerts".startsWith(prefix)) {
+            suggestions.add("alerts");
         }
-        return List.of();
+        if (sender.hasPermission("keenac.reload") && "reload".startsWith(prefix)) {
+            suggestions.add("reload");
+        }
+        return suggestions;
     }
 
     private String color(String text) {
