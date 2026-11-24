@@ -89,7 +89,7 @@ public final class NoSlowCheck implements Listener {
             int vl = violations.merge(id, 1, Integer::sum);
             plugin.getAlertManager().send("NoSlow", player, vl);
             data.samples = 0;
-            if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) {
+            if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && vl >= 3) {
                 data.flagged = true;
             }
         }
