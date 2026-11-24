@@ -32,6 +32,7 @@ public final class NoSlowCheck implements Listener {
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
         Bukkit.getScheduler().runTaskTimer(plugin, this::decayViolations, 20L, 20L);
+        Bukkit.getScheduler().runTaskTimer(plugin, this::interruptFlaggedUse, 1L, 1L);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -103,7 +104,7 @@ public final class NoSlowCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onConsume(PlayerItemConsumeEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        Material pendingType = pendingConsumeCancellation.remove(id);
+        Material pendingType = pendingConsumeCancellation.get(id);
         if (pendingType != null && event.getItem().getType() == pendingType
                 && plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) {
             event.setCancelled(true);
@@ -124,6 +125,28 @@ public final class NoSlowCheck implements Listener {
         violations.clear();
         lastViolationNanos.clear();
         pendingConsumeCancellation.clear();
+    }
+
+    private void interruptFlaggedUse() {
+        Iterator<Map.Entry<UUID, Material>> iterator = pendingConsumeCancellation.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, Material> entry = iterator.next();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) {
+                iterator.remove();
+                continue;
+            }
+            Material tracked = entry.getValue();
+            boolean stillHolding = player.getInventory().getItemInMainHand().getType() == tracked
+                    || player.getInventory().getItemInOffHand().getType() == tracked;
+            if (!stillHolding) {
+                iterator.remove();
+                continue;
+            }
+            if (player.isHandRaised()) {
+                player.clearActiveItem();
+            }
+        }
     }
 
     private void decayViolations() {
