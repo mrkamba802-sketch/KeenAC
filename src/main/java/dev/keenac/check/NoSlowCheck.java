@@ -29,6 +29,7 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
     private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
     private final Map<UUID, Long> lastCancellationAlertNanos = new HashMap<>();
+    private final Map<UUID, Long> lastAirborneNanos = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -120,6 +121,7 @@ public final class NoSlowCheck implements Listener {
         lastViolationNanos.remove(id);
         pendingConsumeCancellation.remove(id);
         lastCancellationAlertNanos.remove(id);
+        lastAirborneNanos.remove(id);
     }
 
     public void clearAll() {
@@ -128,6 +130,7 @@ public final class NoSlowCheck implements Listener {
         lastViolationNanos.clear();
         pendingConsumeCancellation.clear();
         lastCancellationAlertNanos.clear();
+        lastAirborneNanos.clear();
     }
 
     private void interruptFlaggedUse() {
@@ -199,6 +202,16 @@ public final class NoSlowCheck implements Listener {
     }
 
     private boolean isExempt(Player player, Block block) {
+        UUID id = player.getUniqueId();
+        long now = System.nanoTime();
+        // Sprint-jumping preserves horizontal momentum while item use is active.
+        // Ignore airborne movement and a short landing window to avoid false NoSlow flags.
+        if (!player.isOnGround() || player.getVelocity().getY() > 0.08) {
+            lastAirborneNanos.put(id, now);
+            return true;
+        }
+        if (now - lastAirborneNanos.getOrDefault(id, 0L) < 400_000_000L) return true;
+
         if (player.isDead() || !player.isValid() || player.isInsideVehicle()
                 || player.isGliding() || player.isSwimming() || player.isFlying()
                 || player.isInWater() || player.isClimbing()
