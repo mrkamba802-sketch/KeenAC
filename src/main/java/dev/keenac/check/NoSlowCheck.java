@@ -156,7 +156,8 @@ public final class NoSlowCheck implements Listener {
                 long now = System.nanoTime();
                 long lastAlert = lastCancellationAlertNanos.getOrDefault(id, 0L);
                 if (now - lastAlert >= 2_000_000_000L) {
-                    int vl = violations.getOrDefault(id, 0);
+                    int vl = violations.merge(id, 1, Integer::sum);
+                    lastViolationNanos.put(id, now);
                     plugin.getAlertManager().send("NoSlow", player, vl);
                     lastCancellationAlertNanos.put(id, now);
                 }
