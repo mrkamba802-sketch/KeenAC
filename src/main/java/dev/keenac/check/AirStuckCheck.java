@@ -207,12 +207,7 @@ public final class AirStuckCheck {
         String message = ChatColor.translateAlternateColorCodes('&',
                 String.format(ALERT_FORMAT, player.getName(), state.violationLevel));
 
-        Bukkit.getConsoleSender().sendMessage(message);
-        for (Player online : Bukkit.getOnlinePlayers()) {
-            if (online.hasPermission(ALERT_PERMISSION)) {
-                online.sendMessage(message);
-            }
-        }
+        plugin.getAlertManager().send("AirStuck", player, state.violationLevel);
 
         state.hasAlerted = true;
         state.lastAlertTick = serverTick;
