@@ -1,14 +1,13 @@
 checks:
   air-stuck:
     enabled: true
-    # Still-in-air threshold, counted in server ticks (20 ticks = 1 second).
     stationary-ticks: 10
-    # Movement and velocity must both stay below these thresholds.
     movement-tolerance: 0.02
     velocity-tolerance: 0.02
-    # Cancel normal gameplay actions while a player is flagged.
     cancel-actions: true
+  wall-hit:
+    enabled: true
 
 alerts:
-  # A separate cooldown is maintained for each flagged player.
   delay-seconds: 3
+  format: "&bKeenAC &8» &f%s &7failed &e%s &8(VL: %d)"
