@@ -140,7 +140,7 @@ public final class AirStuckCheck {
 
         int minBlockX = floor(footProbe.getMinX());
         int maxBlockX = floor(footProbe.getMaxX());
-        int minBlockY = floor(footProbe.getMinY());
+        int minBlockY = floor(footProbe.getMinY()) - 1;
         int maxBlockY = floor(footProbe.getMaxY());
         int minBlockZ = floor(footProbe.getMinZ());
         int maxBlockZ = floor(footProbe.getMaxZ());
