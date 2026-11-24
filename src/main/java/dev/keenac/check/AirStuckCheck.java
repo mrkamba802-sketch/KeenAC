@@ -30,6 +30,26 @@ public final class AirStuckCheck {
         this.plugin = plugin;
     }
 
+    /**
+     * Called by the PacketEvents listener on the Bukkit main thread with coordinates
+     * decoded from an incoming client movement packet.
+     */
+    public void recordPacketPosition(Player player, Location packetLocation) {
+        if (packetLocation == null || packetLocation.getWorld() == null) {
+            return;
+        }
+        PlayerState state = states.computeIfAbsent(
+                player.getUniqueId(), ignored -> new PlayerState(player.getLocation()));
+        if (!state.worldId.equals(packetLocation.getWorld().getUID())) {
+            state.worldId = packetLocation.getWorld().getUID();
+            state.anchor = packetLocation.clone();
+            state.packetPosition = packetLocation.clone();
+            clearSuspicion(state);
+            return;
+        }
+        state.packetPosition = packetLocation.clone();
+    }
+
     public void tick() {
         serverTick++;
 
@@ -59,11 +79,18 @@ public final class AirStuckCheck {
         if (isExemptMovementState(player)) {
             state.worldId = player.getWorld().getUID();
             state.anchor = player.getLocation().clone();
+            state.packetPosition = null;
             clearSuspicion(state);
             return;
         }
 
-        Location current = player.getLocation();
+        Location current = state.packetPosition;
+        if (current == null) {
+            // Wait for the first decoded movement packet after join/respawn/teleport.
+            state.anchor = player.getLocation().clone();
+            return;
+        }
+
         if (!state.worldId.equals(current.getWorld().getUID())) {
             state.worldId = current.getWorld().getUID();
             state.anchor = current.clone();
@@ -98,7 +125,7 @@ public final class AirStuckCheck {
     }
 
     private boolean isExemptMovementState(Player player) {
-        // There is deliberately no operator/OP exemption: OPs are checked like every other player.
+        // OP status is intentionally not checked: operators are tested normally.
         if (player.isDead() || !player.isValid()) {
             return true;
         }
@@ -120,22 +147,13 @@ public final class AirStuckCheck {
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
     }
 
-    /**
-     * Uses server-side collision geometry instead of Player#isOnGround(), which is
-     * client-controlled and documented as unreliable for anti-cheat checks.
-     */
     private boolean hasSolidSupport(Player player) {
         BoundingBox playerBox = player.getBoundingBox();
         double feetY = playerBox.getMinY();
 
-        double minX = playerBox.getMinX() + 0.01;
-        double maxX = playerBox.getMaxX() - 0.01;
-        double minZ = playerBox.getMinZ() + 0.01;
-        double maxZ = playerBox.getMaxZ() - 0.01;
-
         BoundingBox footProbe = new BoundingBox(
-                minX, feetY - SUPPORT_EPSILON, minZ,
-                maxX, feetY + 0.001, maxZ
+                playerBox.getMinX() + 0.01, feetY - SUPPORT_EPSILON, playerBox.getMinZ() + 0.01,
+                playerBox.getMaxX() - 0.01, feetY + 0.001, playerBox.getMaxZ() - 0.01
         );
 
         int minBlockX = floor(footProbe.getMinX());
@@ -182,8 +200,6 @@ public final class AirStuckCheck {
             return;
         }
 
-        // The first alert reports the initial VL. Further alerts for a continuous violation
-        // increase VL once per cooldown interval.
         if (state.alertedDuringCurrentFlag) {
             state.violationLevel++;
         }
@@ -232,6 +248,7 @@ public final class AirStuckCheck {
     private static final class PlayerState {
         private UUID worldId;
         private Location anchor;
+        private Location packetPosition;
         private int stationaryTicks;
         private int violationLevel;
         private boolean flagged;
