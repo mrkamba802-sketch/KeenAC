@@ -2,7 +2,10 @@ package dev.keenac;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
+import dev.keenac.check.WallHitCheck;
+import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
 import dev.keenac.listener.PlayerLifecycleListener;
@@ -13,6 +16,7 @@ import org.bukkit.scheduler.BukkitTask;
 public final class KeenAC extends JavaPlugin {
 
     private AirStuckCheck airStuckCheck;
+    private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private BukkitTask tickTask;
 
@@ -26,35 +30,34 @@ public final class KeenAC extends JavaPlugin {
         }
 
         saveDefaultConfig();
-
+        alertManager = new AlertManager(this);
         airStuckCheck = new AirStuckCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
 
-        Bukkit.getPluginManager().registerEvents(
-                new ActionBlockListener(airStuckCheck), this);
-        Bukkit.getPluginManager().registerEvents(
-                new PlayerLifecycleListener(airStuckCheck), this);
+        Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
+        Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
+        Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
 
-        // Packet positions are sampled by PacketEvents; Bukkit tick task evaluates
-        // collision support and advances the stationary-in-air counter safely.
-        tickTask = Bukkit.getScheduler().runTaskTimer(
-                this, airStuckCheck::tick, 1L, 1L);
+        KeenACCommand executor = new KeenACCommand(this);
+        getCommand("keenac").setExecutor(executor);
+        getCommand("keenac").setTabCompleter(executor);
 
-        getLogger().info("KeenAC enabled with PacketEvents "
-                + PacketEvents.getAPI().getVersion() + ".");
+        tickTask = Bukkit.getScheduler().runTaskTimer(this, airStuckCheck::tick, 1L, 1L);
+        getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
+    }
+
+    public AlertManager getAlertManager() {
+        return alertManager;
     }
 
     @Override
     public void onDisable() {
-        if (tickTask != null) {
-            tickTask.cancel();
-        }
+        if (tickTask != null) tickTask.cancel();
         if (packetListener != null && PacketEvents.getAPI() != null) {
             PacketEvents.getAPI().getEventManager().unregisterListener(packetListener);
         }
-        if (airStuckCheck != null) {
-            airStuckCheck.clearAll();
-        }
+        if (airStuckCheck != null) airStuckCheck.clearAll();
+        if (alertManager != null) alertManager.clearAll();
     }
 }
