@@ -1,6 +1,7 @@
 package dev.keenac.listener;
 
 import dev.keenac.check.AirStuckCheck;
+import org.bukkit.Material;
 import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -39,6 +40,11 @@ public final class ActionBlockListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent event) {
+        // The right-click event happens before ProjectileLaunchEvent. Allow only
+        // the legitimate Ender Pearl item use even when AirStuck has a stale flag.
+        if (event.getItem() != null && event.getItem().getType() == Material.ENDER_PEARL) {
+            return;
+        }
         cancelIfFlagged(event.getPlayer(), event);
     }
 
