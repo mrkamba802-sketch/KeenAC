@@ -76,7 +76,23 @@ checks:
       freeze-duration-ms: 3500
       # Maximum age of the last grounded rollback point when no recent jump exists.
       safe-position-max-age-ms: 15000
+    # PacketEvents horizontal movement analysis; includes Speed and strafe acceleration.
+    speed:
+      multiplier: 1.30
+      buffer-bps: 0.55
+      confirm-samples: 3
+    packet-alert-cooldown-ms: 400
     # Log potion effects, effective movement attribute, velocity and movement states to console.
+    log-context: true
+
+  no-fall:
+    enabled: true
+    # Ignore short falls and require repeated client onGround claims.
+    minimum-fall-distance: 3.0
+    required-packets: 2
+    packet-window-ms: 750
+    max-ping-ms: 250
+    alert-cooldown-ms: 2000
     log-context: true
 
   elytra-speed:
