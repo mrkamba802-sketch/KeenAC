@@ -76,10 +76,28 @@ checks:
       enabled: true
       # Only use a jump origin saved recently (milliseconds).
       jump-origin-max-age-ms: 3000
-      # Hard positional freeze after the rollback (milliseconds).
-      freeze-duration-ms: 1500
+      # Extended hard positional freeze after the rollback (milliseconds).
+      freeze-duration-ms: 3500
+      # Maximum age of the last grounded rollback point when no recent jump exists.
+      safe-position-max-age-ms: 15000
     # Log potion effects, effective movement attribute, velocity and movement states to console.
     log-context: true
+
+  elytra-speed:
+    enabled: true
+    # Flag only when measured 3D flight speed is strictly greater than this BPS.
+    max-bps: 34.1
+    # Consecutive over-limit samples to confirm a violation.
+    confirm-samples: 2
+    max-ping-ms: 250
+    alert-cooldown-ms: 1500
+    log-context: true
+    setback:
+      enabled: true
+      # Return to the last grounded position if it is still reasonably recent.
+      safe-position-max-age-ms: 30000
+      # Stop elytra flight and hard-freeze movement after the rollback.
+      freeze-duration-ms: 2500
 
   aura:
     enabled: true
