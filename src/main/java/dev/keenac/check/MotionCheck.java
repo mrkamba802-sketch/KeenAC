@@ -64,8 +64,6 @@ public final class MotionCheck implements Listener {
     private volatile long elytraPacketCooldownNanos = 1_500_000_000L;
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
     private final Map<UUID, Location> samplePositions = new HashMap<>();
-    private final Map<UUID, Long> sampleTimesNanos = new HashMap<>();
-    private final Map<UUID, Integer> excessiveSpeedTicks = new HashMap<>();
     private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
     private final Map<UUID, Integer> violationLevels = new HashMap<>();
     private final Map<UUID, Long> lastSignalTick = new HashMap<>();
@@ -91,7 +89,6 @@ public final class MotionCheck implements Listener {
         }
 
         refreshElytraPacketSettings();
-        long nowNanos = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             UUID id = player.getUniqueId();
             if (isFrozen(id, System.currentTimeMillis())) {
@@ -102,7 +99,7 @@ public final class MotionCheck implements Listener {
             }
             refreshElytraPacketEligibility(player);
             if (motionEnabled) {
-                inspectMovement(player, nowNanos);
+                inspectMovement(player);
             }
         }
 
@@ -110,8 +107,6 @@ public final class MotionCheck implements Listener {
                 .map(Player::getUniqueId)
                 .collect(Collectors.toSet());
         samplePositions.keySet().removeIf(id -> !online.contains(id));
-        sampleTimesNanos.keySet().removeIf(id -> !online.contains(id));
-        excessiveSpeedTicks.keySet().removeIf(id -> !online.contains(id));
         hoveringTicks.keySet().removeIf(id -> !online.contains(id));
         elytraPacketStates.keySet().removeIf(id -> !online.contains(id));
         elytraGlidingPlayers.retainAll(online);
@@ -351,7 +346,7 @@ public final class MotionCheck implements Listener {
         }
     }
 
-    private void inspectMovement(Player player, long nowNanos) {
+    private void inspectMovement(Player player) {
         UUID id = player.getUniqueId();
         Location current = player.getLocation();
 
@@ -384,45 +379,13 @@ public final class MotionCheck implements Listener {
         }
 
         Location previous = samplePositions.put(id, current.clone());
-        Long previousTime = sampleTimesNanos.put(id, nowNanos);
-        if (previous == null || previousTime == null
-                || previous.getWorld() != current.getWorld()) {
-            excessiveSpeedTicks.remove(id);
+        if (previous == null || previous.getWorld() != current.getWorld()) {
             hoveringTicks.remove(id);
             return;
         }
 
-        double elapsedSeconds = (nowNanos - previousTime) / 1_000_000_000.0;
-        if (elapsedSeconds < 0.015 || elapsedSeconds > 0.75) {
-            excessiveSpeedTicks.remove(id);
-            hoveringTicks.remove(id);
-            return;
-        }
-
-        double dx = current.getX() - previous.getX();
-        double dz = current.getZ() - previous.getZ();
-        double horizontalSpeed = Math.sqrt(dx * dx + dz * dz) / elapsedSeconds;
-        double allowedSpeed = getAllowedHorizontalSpeed(player);
-
-        double speedMultiplier = Math.max(1.05,
-                plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.45));
-        double speedBuffer = Math.max(0.0,
-                plugin.getConfig().getDouble("checks.motion.speed.buffer", 0.75));
-        double speedLimit = allowedSpeed * speedMultiplier + speedBuffer;
-
-        if (horizontalSpeed > speedLimit) {
-            int ticks = excessiveSpeedTicks.getOrDefault(id, 0) + 1;
-            excessiveSpeedTicks.put(id, ticks);
-            int requiredTicks = Math.max(2,
-                    plugin.getConfig().getInt("checks.motion.speed.confirm-ticks", 3));
-            if (ticks >= requiredTicks) {
-                recordSuspicion(player, String.format(java.util.Locale.ROOT,
-                        "sustained-horizontal-speed=%.2f-limit=%.2f", horizontalSpeed, speedLimit));
-            }
-        } else {
-            excessiveSpeedTicks.remove(id);
-        }
-
+        // Motion intentionally does not evaluate horizontal BPS or movement speed.
+        // It keeps the sustained-hover signal and all existing context filters.
         inspectHover(player, previous, current);
     }
 
@@ -489,26 +452,6 @@ public final class MotionCheck implements Listener {
                 || name.contains("BUBBLE_COLUMN");
     }
 
-    private double getAllowedHorizontalSpeed(Player player) {
-        AttributeInstance movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        double speed = movementAttribute == null ? 0.1 : movementAttribute.getValue();
-        // Vanilla walk speed is approximately 4.317 blocks/second at attribute 0.1.
-        speed = Math.max(0.01, speed) * 43.17;
-        if (player.isSprinting()) {
-            speed *= 1.3;
-        }
-
-        PotionEffect speedEffect = player.getPotionEffect(PotionEffectType.SPEED);
-        if (speedEffect != null) {
-            speed *= 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
-        }
-        PotionEffect slowEffect = player.getPotionEffect(PotionEffectType.SLOWNESS);
-        if (slowEffect != null) {
-            speed *= Math.max(0.1, 1.0 - 0.15 * (slowEffect.getAmplifier() + 1));
-        }
-        return speed;
-    }
-
     private void inspectHover(Player player, Location previous, Location current) {
         UUID id = player.getUniqueId();
         if (player.isOnGround()
@@ -537,31 +480,26 @@ public final class MotionCheck implements Listener {
         }
     }
 
-    private void resetMovementSample(UUID id, Location location, long nowNanos) {
+    private void resetMovementSample(UUID id, Location location) {
         samplePositions.put(id, location.clone());
-        sampleTimesNanos.put(id, nowNanos);
-        excessiveSpeedTicks.remove(id);
         hoveringTicks.remove(id);
     }
 
     private void clearMotionEvidence(UUID id) {
         suspicionTimes.remove(id);
         reviewUntil.remove(id);
-        excessiveSpeedTicks.remove(id);
         hoveringTicks.remove(id);
         lastSignalTick.remove(id);
     }
 
     private void clearMovementSamples() {
         samplePositions.clear();
-        sampleTimesNanos.clear();
-        excessiveSpeedTicks.clear();
         hoveringTicks.clear();
     }
 
     /**
      * Submit one movement anomaly. Multiple signals in the same server tick
-     * are collapsed into one sample so speed and hover cannot double-count.
+     * are collapsed into one sample so hover cannot be counted more than once.
      * Every completed review window raises the player's persistent Motion VL.
      */
     public void recordSuspicion(Player player, String reason) {
@@ -752,7 +690,6 @@ public final class MotionCheck implements Listener {
         lastGlideChangeAt.put(id, System.currentTimeMillis());
         clearMotionEvidence(id);
         samplePositions.remove(id);
-        sampleTimesNanos.remove(id);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -932,8 +869,6 @@ public final class MotionCheck implements Listener {
         pendingElytraSetbacks.remove(id);
         applyingSetbacks.remove(id);
         samplePositions.remove(id);
-        sampleTimesNanos.remove(id);
-        excessiveSpeedTicks.remove(id);
         hoveringTicks.remove(id);
         violationLevels.remove(id);
         lastSignalTick.remove(id);
