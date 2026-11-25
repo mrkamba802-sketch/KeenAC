@@ -37,6 +37,15 @@ checks:
     # Maximum allowed player displacement in one movement event while inside cobweb.
     max-move-distance: 0.08
 
+  auto-swap:
+    enabled: true
+    # Alert-only heuristic. Counts repeated inventory slot-swap operations,
+    # not ordinary clicks, shift-click transfers or drag events.
+    # High thresholds are intentional to reduce alerts during manual sorting.
+    required-swaps: 15
+    window-ms: 900
+    alert-cooldown-ms: 5000
+
 alerts:
   enabled: true
   # Minimum delay between alerts for the same player and check.
