@@ -15,6 +15,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.attribute.Attribute;
+import org.bukkit.enchantments.Enchantment;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -69,7 +70,9 @@ public final class NoSlowCheck implements Listener {
         if (event.getTo() == null) return;
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
-        if (!player.isHandRaised()) {
+        // hasActiveItem() is the server-side usage state. Unlike the old
+        // hand-raised pose check, it also works while the player is swimming.
+        if (!player.hasActiveItem() || !isTrackedConsumable(player.getActiveItem())) {
             // The check itself may have interrupted item use. Keep the pending
             // state and samples so we can resume measuring when the player tries again.
             if (!pendingConsumeCancellation.containsKey(id)) {
@@ -100,13 +103,13 @@ public final class NoSlowCheck implements Listener {
         double dx = event.getTo().getX() - data.lastLocation.getX();
         double dz = event.getTo().getZ() - data.lastLocation.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
-        double seconds = elapsedNanos / 1_000_000_000.0;
-        double movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED) == null
-                ? 0.1 : player.getAttribute(Attribute.MOVEMENT_SPEED).getValue();
-        // Vanilla item-use movement is heavily reduced. Allow a generous margin for
-        // latency, collision resolution, and attribute modifiers to avoid false flags.
-        double allowed = movementAttribute * 0.2 * 20.0 * seconds + 0.035;
-        boolean suspicious = horizontal > allowed * 2.6 && horizontal > 0.09;
+        // Do not let one delayed movement event accumulate several seconds of
+        // movement allowance. Normal packet jitter is still covered by tolerance.
+        double seconds = Math.min(elapsedNanos / 1_000_000_000.0, 0.25);
+        boolean inWater = player.isInWater() || player.isSwimming();
+        double allowed = getAllowedItemUseSpeed(player, inWater) * seconds * 1.45
+                + (inWater ? 0.012 : 0.02);
+        boolean suspicious = horizontal > allowed && horizontal > (inWater ? 0.035 : 0.09);
 
         data.lastLocation = event.getTo().clone();
         data.lastSampleNanos = System.nanoTime();
@@ -133,7 +136,8 @@ public final class NoSlowCheck implements Listener {
         if (data.samples >= required) {
             recordViolation(player);
             data.samples = 0;
-            if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && vl >= 3) {
+            int currentVl = violations.getOrDefault(id, 0);
+            if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && currentVl >= 3) {
                 Material used = getTrackedItemType(player);
                 if (used != null) pendingConsumeCancellation.put(id, used);
             }
@@ -277,6 +281,54 @@ public final class NoSlowCheck implements Listener {
         return type.isEdible() || type == Material.POTION || type == Material.MILK_BUCKET;
     }
 
+    /**
+     * Estimates vanilla horizontal movement while an item is being used.
+     * Ground and water have different movement speeds; water additionally
+     * accounts for sprint-swimming, Depth Strider, Dolphin's Grace and
+     * movement-speed potion/attribute modifiers.
+     */
+    private double getAllowedItemUseSpeed(Player player, boolean inWater) {
+        double movementMultiplier = 1.0;
+        if (player.getAttribute(Attribute.MOVEMENT_SPEED) != null) {
+            Attribute movement = Attribute.MOVEMENT_SPEED;
+            double base = player.getAttribute(movement).getBaseValue();
+            double value = player.getAttribute(movement).getValue();
+            if (base > 0.0) {
+                movementMultiplier = Math.max(0.75, Math.min(4.0, value / base));
+            }
+        }
+
+        if (inWater) {
+            int depthStrider = 0;
+            ItemStack boots = player.getInventory().getBoots();
+            if (boots != null) {
+                depthStrider = boots.getEnchantmentLevel(Enchantment.DEPTH_STRIDER);
+            }
+
+            double fullWaterSpeed;
+            if (player.hasPotionEffect(PotionEffectType.DOLPHINS_GRACE)) {
+                // Java Edition Dolphin's Grace combines with Depth Strider.
+                fullWaterSpeed = 9.8 + 8.983 * depthStrider;
+            } else if (player.isSwimming() && player.isSprinting()) {
+                // Sprint-swimming speed; Depth Strider III reaches about 5.3 blocks/sec.
+                fullWaterSpeed = 3.918 * (1.0 + 0.118 * depthStrider);
+            } else if (player.isSwimming()) {
+                fullWaterSpeed = 2.20 * (1.0 + depthStrider / 3.0);
+            } else {
+                fullWaterSpeed = 1.97 * (1.0 + depthStrider / 3.0);
+            }
+            return fullWaterSpeed * movementMultiplier * 0.2;
+        }
+
+        // Normal walking speed is approximately 4.317 blocks/sec at the
+        // default movement attribute. Sprinting increases it by about 30%.
+        double fullGroundSpeed = 4.317 * movementMultiplier;
+        if (player.isSprinting()) {
+            fullGroundSpeed *= 1.3;
+        }
+        return fullGroundSpeed * 0.2;
+    }
+
     private boolean isExempt(Player player, Block block) {
         UUID id = player.getUniqueId();
         long now = System.nanoTime();
@@ -293,7 +345,9 @@ public final class NoSlowCheck implements Listener {
                 || player.isGliding() || player.isFlying() || player.isClimbing()
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
                 || player.hasPotionEffect(PotionEffectType.LEVITATION)) return true;
-        if (!plugin.getConfig().getBoolean("checks.no-slow.block-friction", true)) return false;
+        // Floor-friction exemptions are for land movement. Applying them to
+        // submerged players can silently disable NoSlow throughout the water.
+        if (!plugin.getConfig().getBoolean("checks.no-slow.block-friction", true) || inWater) return false;
         Material under = block.getRelative(0, -1, 0).getType();
         return under == Material.ICE || under == Material.PACKED_ICE
                 || under == Material.BLUE_ICE || under == Material.FROSTED_ICE
