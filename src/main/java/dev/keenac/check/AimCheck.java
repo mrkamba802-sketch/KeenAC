@@ -143,7 +143,7 @@ public final class AimCheck implements Listener {
             }
 
             targets.put(entityId, new TargetSnapshot(
-                    id, worldId, location.getX(),
+                    entityId, id, worldId, location.getX(),
                     location.getY(), location.getZ(),
                     Math.max(1.0, player.getHeight()),
                     Math.hypot(moveX, moveZ),
@@ -450,6 +450,7 @@ public final class AimCheck implements Listener {
             boolean smoothApproach) { }
 
     private record TargetSnapshot(
+            int entityId,
             UUID playerId,
             UUID worldId,
             double x,
@@ -457,7 +458,5 @@ public final class AimCheck implements Listener {
             double z,
             double height,
             double horizontalMotion,
-            int ping) {
-        private int entityId;
-    }
+            int ping) { }
 }
