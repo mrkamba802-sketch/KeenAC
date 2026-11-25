@@ -11,6 +11,7 @@ import dev.keenac.check.NoWebCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
+import dev.keenac.listener.PacketAutoSwapListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -22,6 +23,7 @@ public final class KeenAC extends JavaPlugin {
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
+    private PacketListenerAbstract autoSwapPacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -41,7 +43,9 @@ public final class KeenAC extends JavaPlugin {
         airStuckCheck = new AirStuckCheck(this);
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
+        autoSwapPacketListener = new PacketAutoSwapListener(this, inventoryAutoSwapCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
+        PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
 
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
@@ -65,8 +69,13 @@ public final class KeenAC extends JavaPlugin {
     @Override
     public void onDisable() {
         if (tickTask != null) tickTask.cancel();
-        if (packetListener != null && PacketEvents.getAPI() != null) {
-            PacketEvents.getAPI().getEventManager().unregisterListener(packetListener);
+        if (PacketEvents.getAPI() != null) {
+            if (packetListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(packetListener);
+            }
+            if (autoSwapPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(autoSwapPacketListener);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
