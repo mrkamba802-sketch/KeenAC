@@ -56,6 +56,11 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, ElytraPacketState> elytraPacketStates = new ConcurrentHashMap<>();
     private final Set<UUID> elytraGlidingPlayers = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Integer> elytraPing = new ConcurrentHashMap<>();
+    private volatile boolean elytraPacketEnabled = true;
+    private volatile int elytraPacketMaxPing = 250;
+    private volatile double elytraPacketMaxBps = 34.1;
+    private volatile int elytraPacketConfirmSamples = 2;
+    private volatile long elytraPacketCooldownNanos = 1_500_000_000L;
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
     private final Map<UUID, Location> samplePositions = new HashMap<>();
     private final Map<UUID, Long> sampleTimesNanos = new HashMap<>();
@@ -84,6 +89,7 @@ public final class MotionCheck implements Listener {
             clearMovementSamples();
         }
 
+        refreshElytraPacketSettings();
         long nowNanos = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             UUID id = player.getUniqueId();
@@ -128,9 +134,22 @@ public final class MotionCheck implements Listener {
      * Refresh Bukkit-only player state on the main thread. Incoming position packets
      * are measured directly by PacketEvents using this lightweight eligibility cache.
      */
+    private void refreshElytraPacketSettings() {
+        elytraPacketEnabled = plugin.getConfig().getBoolean("checks.elytra-speed.enabled", true);
+        elytraPacketMaxPing = Math.max(50,
+                plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
+        elytraPacketMaxBps = Math.max(1.0,
+                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 34.1));
+        elytraPacketConfirmSamples = Math.max(1,
+                plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
+        elytraPacketCooldownNanos = Math.max(250L,
+                plugin.getConfig().getLong("checks.elytra-speed.alert-cooldown-ms", 1500L))
+                * 1_000_000L;
+    }
+
     private void refreshElytraPacketEligibility(Player player) {
         UUID id = player.getUniqueId();
-        boolean eligible = plugin.getConfig().getBoolean("checks.elytra-speed.enabled", true)
+        boolean eligible = elytraPacketEnabled
                 && player.isGliding() && player.isOnline() && player.isValid()
                 && !player.isInsideVehicle()
                 && player.getGameMode() != GameMode.CREATIVE
@@ -150,26 +169,19 @@ public final class MotionCheck implements Listener {
      * packet. Only primitive packet values and concurrent state are accessed here.
      */
     public void recordElytraPacketPosition(UUID id, double x, double y, double z) {
-        if (!plugin.getConfig().getBoolean("checks.elytra-speed.enabled", true)
-                || !elytraGlidingPlayers.contains(id)) {
+        if (!elytraPacketEnabled || !elytraGlidingPlayers.contains(id)) {
             return;
         }
 
-        int maxPing = Math.max(50,
-                plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
-        if (elytraPing.getOrDefault(id, maxPing + 1) > maxPing) {
+        if (elytraPing.getOrDefault(id, elytraPacketMaxPing + 1) > elytraPacketMaxPing) {
             elytraPacketStates.remove(id);
             return;
         }
 
         long nowNanos = System.nanoTime();
-        double threshold = Math.max(1.0,
-                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 34.1));
-        int required = Math.max(1,
-                plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
-        long cooldownNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.elytra-speed.alert-cooldown-ms", 1500L))
-                * 1_000_000L;
+        double threshold = elytraPacketMaxBps;
+        int required = elytraPacketConfirmSamples;
+        long cooldownNanos = elytraPacketCooldownNanos;
 
         ElytraPacketState state = elytraPacketStates.computeIfAbsent(
                 id, ignored -> new ElytraPacketState());
