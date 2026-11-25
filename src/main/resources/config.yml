@@ -58,13 +58,14 @@ checks:
     review-window-ms: 3000
     # Recent velocity events are included as legitimate movement context and suppress setback.
     velocity-grace-ms: 1200
-    # Apply at most one small rollback when the fifth signal is reached.
+    # Return to the exact location where the latest jump started after x5.
+    # Then reject all positional movement for the configured duration.
     setback:
       enabled: true
-      # Only use a movement position recorded very recently.
-      max-age-ms: 300
-      # Roll back at most one small movement step; skip larger corrections.
-      max-distance: 0.75
+      # Only use a jump origin saved recently (milliseconds).
+      jump-origin-max-age-ms: 3000
+      # Hard positional freeze after the rollback (milliseconds).
+      freeze-duration-ms: 1500
     # Log potion effects, effective movement attribute, velocity and movement states to console.
     log-context: true
 
