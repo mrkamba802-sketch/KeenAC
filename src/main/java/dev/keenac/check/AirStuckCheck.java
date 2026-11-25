@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
+import org.bukkit.event.inventory.InventoryType;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -126,20 +127,28 @@ public final class AirStuckCheck {
         // Grounded players must never be evaluated by AirStuck. isOnGround()
         // covers ordinary standing/walking; the collision probe is a fallback
         // for server implementations where the ground flag is briefly stale.
-        if (player.isOnGround() || hasSolidSupport(player) || moved) {
+        if (player.isOnGround() || hasSolidSupport(player) || moved
+                || player.getOpenInventory().getType() != InventoryType.CRAFTING) {
             state.anchor = current.clone();
             clearSuspicion(player, state);
             return;
         }
 
-        // Lack of position updates alone is not proof of AirStuck. Only count
-        // stationary ticks while the server says the player is actively falling.
-        // This avoids flags at jump apexes, during ordinary idle time and while
-        // a player is merely pressed against a horizontal obstacle.
-        double velocityTolerance = Math.max(0.08,
-                plugin.getConfig().getDouble("checks.air-stuck.velocity-tolerance", 0.08));
+        // A missing position update is not proof by itself. Require a meaningful
+        // downward velocity, a clear movement path, a stable connection and a
+        // longer confirmation interval before declaring a real air freeze.
+        int maxPing = Math.max(100,
+                plugin.getConfig().getInt("checks.air-stuck.max-ping-ms", 250));
+        if (player.getPing() > maxPing) {
+            state.anchor = current.clone();
+            clearSuspicion(player, state);
+            return;
+        }
+
+        double velocityTolerance = Math.max(0.15,
+                plugin.getConfig().getDouble("checks.air-stuck.velocity-tolerance", 0.18));
         Vector velocity = player.getVelocity();
-        if (velocity.getY() >= -velocityTolerance) {
+        if (velocity.getY() >= -velocityTolerance || isMovementPathBlocked(player, velocity)) {
             state.anchor = current.clone();
             clearSuspicion(player, state);
             return;
@@ -147,8 +156,8 @@ public final class AirStuckCheck {
 
         state.stationaryTicks++;
 
-        int requiredTicks = Math.max(1,
-                plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 10));
+        int requiredTicks = Math.max(30,
+                plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 40));
 
         if (state.stationaryTicks >= requiredTicks) {
             flag(player, state);
@@ -169,8 +178,8 @@ public final class AirStuckCheck {
             return;
         }
 
-        long graceTicks = Math.max(1L,
-                plugin.getConfig().getLong("checks.air-stuck.pearl-grace-ticks", 80L));
+        long graceTicks = Math.max(200L,
+                plugin.getConfig().getLong("checks.air-stuck.pearl-grace-ticks", 200L));
         UUID id = player.getUniqueId();
         pearlGraceUntilTick.put(id, Math.max(
                 pearlGraceUntilTick.getOrDefault(id, 0L),
@@ -237,6 +246,44 @@ public final class AirStuckCheck {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     if (player.getWorld().getBlockAt(x, y, z).getType() == Material.COBWEB) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true when the next server-velocity displacement would intersect
+     * a block collision shape. A player pressed against terrain is not frozen.
+     */
+    private boolean isMovementPathBlocked(Player player, Vector velocity) {
+        double dx = Math.max(-1.25, Math.min(1.25, velocity.getX()));
+        double dy = Math.max(-1.25, Math.min(1.25, velocity.getY()));
+        double dz = Math.max(-1.25, Math.min(1.25, velocity.getZ()));
+        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1.0E-5) {
+            return false;
+        }
+
+        BoundingBox box = player.getBoundingBox();
+        BoundingBox expected = new BoundingBox(
+                box.getMinX() + dx, box.getMinY() + dy, box.getMinZ() + dz,
+                box.getMaxX() + dx, box.getMaxY() + dy, box.getMaxZ() + dz
+        );
+
+        int minX = floor(expected.getMinX());
+        int maxX = floor(expected.getMaxX() - 1.0E-6);
+        int minY = floor(expected.getMinY());
+        int maxY = floor(expected.getMaxY() - 1.0E-6);
+        int minZ = floor(expected.getMinZ());
+        int maxZ = floor(expected.getMaxZ() - 1.0E-6);
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Block block = player.getWorld().getBlockAt(x, y, z);
+                    if (block.getCollisionShape().overlaps(expected)) {
                         return true;
                     }
                 }
