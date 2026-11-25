@@ -141,7 +141,11 @@ public final class NoSlowCheck implements Listener {
     public void onConsume(PlayerItemConsumeEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         Material pendingType = pendingConsumeCancellation.get(id);
-        if (pendingType != null && event.getItem().getType() == pendingType
+        UseData data = usingItems.get(id);
+        boolean recentlySuspicious = data != null && data.lastSuspiciousNanos > 0L
+                && System.nanoTime() - data.lastSuspiciousNanos <= 750_000_000L;
+        if (pendingType != null && recentlySuspicious
+                && event.getItem().getType() == pendingType
                 && shouldCancelConsume(pendingType)) {
             event.setCancelled(true);
             event.getPlayer().clearActiveItem();
