@@ -93,6 +93,14 @@ checks:
     packet-window-ms: 750
     max-ping-ms: 250
     alert-cooldown-ms: 2000
+    # On a confirmed NoFall violation, return to the latest safe ground position.
+    setback:
+      enabled: true
+      safe-position-max-age-ms: 30000
+    # Apply fall damage after rollback if the player suppressed a damaging fall.
+    # Base amount follows ceil(fallDistance - 3).
+    damage:
+      enabled: true
     log-context: true
 
   elytra-speed:
