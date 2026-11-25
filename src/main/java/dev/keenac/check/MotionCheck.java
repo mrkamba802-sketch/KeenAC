@@ -65,6 +65,14 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
     private final Map<UUID, Location> samplePositions = new HashMap<>();
     private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
+    private final Map<UUID, MotionPacketProfile> motionPacketProfiles = new ConcurrentHashMap<>();
+    private final Map<UUID, MotionPacketState> motionPacketStates = new ConcurrentHashMap<>();
+    private volatile double motionSpeedMultiplier = 1.30;
+    private volatile double motionSpeedBufferBps = 0.55;
+    private volatile int motionSpeedConfirmSamples = 3;
+    private volatile int motionPacketMaxPing = 250;
+    private volatile long motionPacketCooldownNanos = 400_000_000L;
+    private volatile long motionHoverConfirmNanos = 600_000_000L;
     private final Map<UUID, Integer> violationLevels = new HashMap<>();
     private final Map<UUID, Long> lastSignalTick = new HashMap<>();
     private final Set<UUID> pendingSetbacks = new HashSet<>();
@@ -89,6 +97,7 @@ public final class MotionCheck implements Listener {
         }
 
         refreshElytraPacketSettings();
+        refreshMotionPacketSettings();
         for (Player player : Bukkit.getOnlinePlayers()) {
             UUID id = player.getUniqueId();
             if (isFrozen(id, System.currentTimeMillis())) {
@@ -98,9 +107,7 @@ public final class MotionCheck implements Listener {
                 recordSafeGroundPosition(player);
             }
             refreshElytraPacketEligibility(player);
-            if (motionEnabled) {
-                inspectMovement(player);
-            }
+            refreshMotionPacketProfile(player, motionEnabled);
         }
 
         Set<UUID> online = Bukkit.getOnlinePlayers().stream()
@@ -111,6 +118,8 @@ public final class MotionCheck implements Listener {
         elytraPacketStates.keySet().removeIf(id -> !online.contains(id));
         elytraGlidingPlayers.retainAll(online);
         elytraPing.keySet().removeIf(id -> !online.contains(id));
+        motionPacketProfiles.keySet().removeIf(id -> !online.contains(id));
+        motionPacketStates.keySet().removeIf(id -> !online.contains(id));
         lastSafePosition.keySet().removeIf(id -> !online.contains(id));
         lastSafeAt.keySet().removeIf(id -> !online.contains(id));
         lastGlideChangeAt.keySet().removeIf(id -> !online.contains(id));
@@ -346,66 +355,191 @@ public final class MotionCheck implements Listener {
         }
     }
 
-    private void inspectMovement(Player player) {
+    /**
+     * Cache Bukkit-only movement context on the main thread. Packet callbacks
+     * consume this immutable profile and never query Bukkit world/player state.
+     */
+    private void refreshMotionPacketSettings() {
+        motionSpeedMultiplier = Math.max(1.05,
+                Math.min(3.0, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.30)));
+        motionSpeedBufferBps = Math.max(0.0,
+                plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.55));
+        motionSpeedConfirmSamples = Math.max(1,
+                plugin.getConfig().getInt("checks.motion.speed.confirm-samples", 3));
+        motionPacketMaxPing = Math.max(50,
+                plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
+        motionPacketCooldownNanos = Math.max(200L,
+                plugin.getConfig().getLong("checks.motion.packet-alert-cooldown-ms", 400L))
+                * 1_000_000L;
+        int hoverTicks = Math.max(8,
+                plugin.getConfig().getInt("checks.motion.hover.confirm-ticks", 12));
+        motionHoverConfirmNanos = hoverTicks * 50_000_000L;
+    }
+
+    private void refreshMotionPacketProfile(Player player, boolean enabled) {
         UUID id = player.getUniqueId();
-        Location current = player.getLocation();
-
-        // Elytra flight changes the movement model completely. Ignore all Motion
-        // evidence while airborne with an Elytra equipped, and clear stale samples.
-        if (isElytraMotionExempt(player)) {
-            clearMotionEvidence(id);
-            resetMovementSample(id, current);
-            return;
-        }
-
-        if (!isEligibleForMotionSample(player, current)) {
-            resetMovementSample(id, current);
-            return;
-        }
-
+        Location location = player.getLocation();
+        long now = System.currentTimeMillis();
         long velocityAt = lastVelocityAt.getOrDefault(id, 0L);
         long velocityGrace = Math.max(0L,
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
-        if (velocityAt > 0L && System.currentTimeMillis() - velocityAt <= velocityGrace) {
-            resetMovementSample(id, current);
-            return;
-        }
+        boolean recentVelocity = velocityAt > 0L && now - velocityAt <= velocityGrace;
 
-        int maxPing = Math.max(50,
-                plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
-        if (player.getPing() > maxPing) {
-            resetMovementSample(id, current);
-            return;
-        }
+        boolean specialSurface = isSpecialMovementSurface(location)
+                || isSpecialMovementSurface(location.clone().subtract(0.0, 0.7, 0.0));
+        boolean movementModeEligible = player.isOnline() && player.isValid()
+                && !player.isInsideVehicle() && !player.isFlying() && !player.isGliding()
+                && !player.isSwimming() && !player.isRiptiding()
+                && !player.isInWater()
+                && player.getGameMode() != GameMode.CREATIVE
+                && player.getGameMode() != GameMode.SPECTATOR
+                && player.getOpenInventory().getType() == InventoryType.CRAFTING
+                && !player.hasPotionEffect(PotionEffectType.LEVITATION)
+                && !player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
+                && !specialSurface && !recentVelocity;
 
-        Location previous = samplePositions.put(id, current.clone());
-        if (previous == null || previous.getWorld() != current.getWorld()) {
-            hoveringTicks.remove(id);
-            return;
-        }
+        AttributeInstance movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
+        double base = movementAttribute == null ? 0.1 : Math.max(0.001, movementAttribute.getBaseValue());
+        double value = movementAttribute == null ? base : movementAttribute.getValue();
+        double attributeMultiplier = Math.max(0.5, Math.min(8.0, value / base));
+        PotionEffect speedEffect = player.getPotionEffect(PotionEffectType.SPEED);
+        double potionMultiplier = speedEffect == null ? 1.0 : 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
+        double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
+        // Attribute modifiers may already include sprint and potion modifiers.
+        // Use the larger estimate rather than multiplying them twice.
+        double movementMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
+        double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
+        double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier;
 
-        // Motion intentionally does not evaluate horizontal BPS or movement speed.
-        // It keeps the sustained-hover signal and all existing context filters.
-        inspectHover(player, previous, current);
+        boolean hoverEligible = movementModeEligible && !player.isOnGround()
+                && !player.hasPotionEffect(PotionEffectType.JUMP_BOOST);
+        motionPacketProfiles.put(id, new MotionPacketProfile(
+                enabled && movementModeEligible,
+                hoverEligible,
+                player.getPing(),
+                allowedHorizontalBps,
+                player.getVelocity().getY()));
     }
 
-    private boolean isEligibleForMotionSample(Player player, Location location) {
-        if (!player.isOnline() || !player.isValid()
-                || player.isInsideVehicle() || player.isFlying() || player.isGliding()
-                || player.isSwimming() || player.isRiptiding()
-                || player.getGameMode() == GameMode.CREATIVE
-                || player.getGameMode() == GameMode.SPECTATOR
-                || player.getOpenInventory().getType() != InventoryType.CRAFTING) {
-            return false;
+    /**
+     * Receives absolute client position samples from PacketEvents. Horizontal
+     * speed covers both direct Speed movement and accelerated strafe/bunny-hop
+     * movement; sustained near-zero vertical displacement remains the Hover signal.
+     */
+    public void recordPacketMovement(UUID id, double x, double y, double z, boolean packetOnGround) {
+        MotionPacketProfile profile = motionPacketProfiles.get(id);
+        if (profile == null || !profile.eligible || profile.ping > motionPacketMaxPing) {
+            motionPacketStates.remove(id);
+            return;
         }
 
-        if (player.hasPotionEffect(PotionEffectType.LEVITATION)
-                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)) {
-            return false;
+        long nowNanos = System.nanoTime();
+        MotionPacketState state = motionPacketStates.computeIfAbsent(
+                id, ignored -> new MotionPacketState());
+        String reason = null;
+        synchronized (state) {
+            if (state.lastPacketNanos == 0L || nowNanos - state.lastPacketNanos > 750_000_000L) {
+                state.reset(x, y, z, nowNanos);
+                return;
+            }
+
+            if (nowNanos - state.lastPacketNanos <= 0L) {
+                return;
+            }
+            state.positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
+            state.lastPacketNanos = nowNanos;
+
+            long cutoff = nowNanos - 400_000_000L;
+            while (state.positions.size() > 2) {
+                java.util.Iterator<MotionPositionSample> iterator = state.positions.iterator();
+                iterator.next();
+                MotionPositionSample second = iterator.next();
+                if (second.timestampNanos <= cutoff) {
+                    state.positions.removeFirst();
+                } else {
+                    break;
+                }
+            }
+
+            MotionPositionSample first = state.positions.peekFirst();
+            MotionPositionSample last = state.positions.peekLast();
+            long windowNanos = last.timestampNanos - first.timestampNanos;
+            if (windowNanos >= 250_000_000L) {
+                double dx = last.x - first.x;
+                double dz = last.z - first.z;
+                double horizontalBps = Math.sqrt(dx * dx + dz * dz)
+                        / (windowNanos / 1_000_000_000.0);
+                double allowed = profile.allowedHorizontalBps * motionSpeedMultiplier
+                        + motionSpeedBufferBps;
+                if (horizontalBps > allowed) {
+                    state.fastSamples++;
+                } else if (horizontalBps < allowed * 0.90) {
+                    state.fastSamples = 0;
+                } else {
+                    state.fastSamples = Math.max(0, state.fastSamples - 1);
+                }
+
+                if (state.fastSamples >= motionSpeedConfirmSamples
+                        && nowNanos - state.lastSpeedSignalNanos >= motionPacketCooldownNanos) {
+                    state.fastSamples = 0;
+                    state.lastSpeedSignalNanos = nowNanos;
+                    reason = "horizontal-speed-strafe";
+                }
+            }
+
+            if (reason == null && profile.hoverEligible && !packetOnGround
+                    && Math.abs(y - state.lastY) <= 0.015
+                    && Math.abs(profile.verticalVelocity) <= 0.035) {
+                if (state.hoverSinceNanos == 0L) {
+                    state.hoverSinceNanos = nowNanos;
+                } else if (nowNanos - state.hoverSinceNanos >= motionHoverConfirmNanos
+                        && nowNanos - state.lastHoverSignalNanos >= motionPacketCooldownNanos) {
+                    state.lastHoverSignalNanos = nowNanos;
+                    reason = "sustained-midair-hover";
+                }
+            } else {
+                state.hoverSinceNanos = 0L;
+            }
+            state.lastY = y;
         }
 
-        return !isSpecialMovementSurface(location)
-                && !isSpecialMovementSurface(location.clone().subtract(0.0, 0.2, 0.0));
+        if (reason != null) {
+            String signal = reason;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                Player player = Bukkit.getPlayer(id);
+                if (player != null && player.isOnline()) {
+                    recordSuspicion(player, signal);
+                }
+            });
+        }
+    }
+
+    private record MotionPacketProfile(
+            boolean eligible,
+            boolean hoverEligible,
+            int ping,
+            double allowedHorizontalBps,
+            double verticalVelocity) { }
+
+    private record MotionPositionSample(double x, double y, double z, long timestampNanos) { }
+
+    private static final class MotionPacketState {
+        private final Deque<MotionPositionSample> positions = new ArrayDeque<>();
+        private long lastPacketNanos;
+        private long lastSpeedSignalNanos;
+        private long lastHoverSignalNanos;
+        private long hoverSinceNanos;
+        private double lastY;
+        private int fastSamples;
+
+        private void reset(double x, double y, double z, long nowNanos) {
+            positions.clear();
+            positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
+            lastPacketNanos = nowNanos;
+            hoverSinceNanos = 0L;
+            lastY = y;
+            fastSamples = 0;
+        }
     }
 
     private boolean isElytraMotionExempt(Player player) {
@@ -495,6 +629,7 @@ public final class MotionCheck implements Listener {
     private void clearMovementSamples() {
         samplePositions.clear();
         hoveringTicks.clear();
+        motionPacketStates.clear();
     }
 
     /**
@@ -870,6 +1005,8 @@ public final class MotionCheck implements Listener {
         applyingSetbacks.remove(id);
         samplePositions.remove(id);
         hoveringTicks.remove(id);
+        motionPacketProfiles.remove(id);
+        motionPacketStates.remove(id);
         violationLevels.remove(id);
         lastSignalTick.remove(id);
     }
@@ -894,6 +1031,8 @@ public final class MotionCheck implements Listener {
         applyingSetbacks.clear();
         violationLevels.clear();
         lastSignalTick.clear();
+        motionPacketProfiles.clear();
+        motionPacketStates.clear();
         clearMovementSamples();
     }
 }
