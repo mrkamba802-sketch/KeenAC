@@ -18,6 +18,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.player.PlayerToggleGlideEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.vehicle.VehicleEnterEvent;
@@ -78,21 +79,24 @@ public final class MotionCheck implements Listener {
      */
     public void tick() {
         serverTick++;
-        if (!plugin.getConfig().getBoolean("checks.motion.enabled", true)) {
+        boolean motionEnabled = plugin.getConfig().getBoolean("checks.motion.enabled", true);
+        if (!motionEnabled) {
             clearMovementSamples();
-            return;
         }
 
         long nowNanos = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             UUID id = player.getUniqueId();
             if (isFrozen(id, System.currentTimeMillis())) {
+                player.setGliding(false);
                 player.setVelocity(new Vector(0.0, 0.0, 0.0));
             } else {
                 recordSafeGroundPosition(player);
             }
             inspectElytraSpeed(player, nowNanos);
-            inspectMovement(player, nowNanos);
+            if (motionEnabled) {
+                inspectMovement(player, nowNanos);
+            }
         }
 
         Set<UUID> online = Bukkit.getOnlinePlayers().stream()
@@ -254,16 +258,18 @@ public final class MotionCheck implements Listener {
             }
         }
 
-        if (applied) {
-            long freezeDuration = Math.max(500L,
-                    plugin.getConfig().getLong("checks.elytra-speed.setback.freeze-duration-ms", 2500L));
-            frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
-            frozenPosition.put(id, player.getLocation().clone());
-            player.setGliding(false);
-            player.setVelocity(new Vector(0.0, 0.0, 0.0));
-            elytraSamplePositions.remove(id);
-            elytraSampleTimesNanos.remove(id);
-            elytraFastSamples.remove(id);
+        long freezeDuration = Math.max(500L,
+                plugin.getConfig().getLong("checks.elytra-speed.setback.freeze-duration-ms", 2500L));
+        frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
+        frozenPosition.put(id, player.getLocation().clone());
+        player.setGliding(false);
+        player.setVelocity(new Vector(0.0, 0.0, 0.0));
+        elytraSamplePositions.remove(id);
+        elytraSampleTimesNanos.remove(id);
+        elytraFastSamples.remove(id);
+        if (!applied) {
+            plugin.getLogger().fine("ElytraSpeed rollback teleport was rejected for "
+                    + player.getName() + "; glide disabled and movement frozen at current position.");
         }
     }
 
@@ -605,20 +611,24 @@ public final class MotionCheck implements Listener {
             return;
         }
 
-        boolean positionChanged = Double.compare(from.getX(), to.getX()) != 0
-                || Double.compare(from.getY(), to.getY()) != 0
-                || Double.compare(from.getZ(), to.getZ()) != 0;
-        if (!positionChanged) {
-            return;
-        }
-
         Location locked = frozenPosition.getOrDefault(id, from).clone();
         if (locked.getWorld() != to.getWorld()) {
             locked = from.clone();
         }
         locked.setYaw(to.getYaw());
         locked.setPitch(to.getPitch());
-        event.setTo(locked);
+        if (Double.compare(to.getX(), locked.getX()) != 0
+                || Double.compare(to.getY(), locked.getY()) != 0
+                || Double.compare(to.getZ(), locked.getZ()) != 0) {
+            event.setTo(locked);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void preventGlidingWhileFrozen(PlayerToggleGlideEvent event) {
+        if (isFrozen(event.getPlayer().getUniqueId(), System.currentTimeMillis())) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -716,7 +726,7 @@ public final class MotionCheck implements Listener {
 
             if (applied) {
                 long freezeDuration = Math.max(1L,
-                        plugin.getConfig().getLong("checks.motion.setback.freeze-duration-ms", 1500L));
+                        plugin.getConfig().getLong("checks.motion.setback.freeze-duration-ms", 3500L));
                 frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
                 frozenPosition.put(id, online.getLocation().clone());
                 online.setVelocity(new Vector(0.0, 0.0, 0.0));
