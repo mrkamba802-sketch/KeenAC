@@ -106,7 +106,6 @@ checks:
   elytra-speed:
     enabled: true
     # Maximum allowed averaged 3D flight speed, measured over a 400 ms packet window.
-    # Maximum allowed averaged 3D flight speed (blocks per second).
     max-bps: 45.1
     # Consecutive over-limit smoothed windows required to confirm a violation.
     confirm-samples: 2
