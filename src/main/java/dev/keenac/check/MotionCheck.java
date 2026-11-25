@@ -144,8 +144,10 @@ public final class MotionCheck implements Listener {
         elytraPacketEnabled = plugin.getConfig().getBoolean("checks.elytra-speed.enabled", true);
         elytraPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
-        elytraPacketMaxBps = Math.max(1.0,
-                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 45.1));
+        // 45.1 BPS is the requested hard ceiling, including when an older
+        // server-side config.yml still contains the previous 85.0 default.
+        elytraPacketMaxBps = Math.min(45.1, Math.max(1.0,
+                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 45.1)));
         elytraPacketConfirmSamples = Math.max(1,
                 plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
         elytraPacketCooldownNanos = Math.max(250L,
