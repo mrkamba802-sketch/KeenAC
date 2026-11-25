@@ -136,7 +136,7 @@ public final class AirStuckCheck {
         // stationary ticks while the server says the player is actively falling.
         // This avoids flags at jump apexes, during ordinary idle time and while
         // a player is merely pressed against a horizontal obstacle.
-        double velocityTolerance = Math.max(0.02,
+        double velocityTolerance = Math.max(0.08,
                 plugin.getConfig().getDouble("checks.air-stuck.velocity-tolerance", 0.08));
         Vector velocity = player.getVelocity();
         if (velocity.getY() >= -velocityTolerance) {
