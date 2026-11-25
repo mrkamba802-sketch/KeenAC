@@ -9,6 +9,7 @@ import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.BoundingBox;
+import org.bukkit.util.Vector;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -126,6 +127,19 @@ public final class AirStuckCheck {
         // covers ordinary standing/walking; the collision probe is a fallback
         // for server implementations where the ground flag is briefly stale.
         if (player.isOnGround() || hasSolidSupport(player) || moved) {
+            state.anchor = current.clone();
+            clearSuspicion(player, state);
+            return;
+        }
+
+        // Lack of position updates alone is not proof of AirStuck. Only count
+        // stationary ticks while the server says the player is actively falling.
+        // This avoids flags at jump apexes, during ordinary idle time and while
+        // a player is merely pressed against a horizontal obstacle.
+        double velocityTolerance = Math.max(0.02,
+                plugin.getConfig().getDouble("checks.air-stuck.velocity-tolerance", 0.08));
+        Vector velocity = player.getVelocity();
+        if (velocity.getY() >= -velocityTolerance) {
             state.anchor = current.clone();
             clearSuspicion(player, state);
             return;
