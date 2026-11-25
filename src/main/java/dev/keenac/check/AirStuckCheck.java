@@ -356,7 +356,8 @@ public final class AirStuckCheck {
     }
 
     public void reset(Player player) {
-        pearlGraceUntilTick.remove(player.getUniqueId());
+        // Keep an active pearl grace through the pearl's teleport event. The
+        // grace expires on its own timer, even if the impact did not teleport.
         PlayerState state = states.remove(player.getUniqueId());
         if (state != null) {
             clearSuspicion(player, state);
