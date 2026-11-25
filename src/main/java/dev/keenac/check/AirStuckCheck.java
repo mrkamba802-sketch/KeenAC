@@ -40,7 +40,7 @@ public final class AirStuckCheck {
             state.worldId = packetLocation.getWorld().getUID();
             state.anchor = packetLocation.clone();
             state.packetPosition = packetLocation.clone();
-            clearSuspicion(state);
+            clearSuspicion(player, state);
             return;
         }
         state.packetPosition = packetLocation.clone();
@@ -50,8 +50,13 @@ public final class AirStuckCheck {
         serverTick++;
 
         if (!plugin.getConfig().getBoolean("checks.air-stuck.enabled", true)) {
-            for (PlayerState state : states.values()) {
-                clearSuspicion(state);
+            for (Map.Entry<UUID, PlayerState> entry : states.entrySet()) {
+                Player player = Bukkit.getPlayer(entry.getKey());
+                if (player != null) {
+                    clearSuspicion(player, entry.getValue());
+                } else {
+                    clearSuspicion(entry.getValue());
+                }
             }
             return;
         }
@@ -76,7 +81,7 @@ public final class AirStuckCheck {
             state.worldId = player.getWorld().getUID();
             state.anchor = player.getLocation().clone();
             state.packetPosition = null;
-            clearSuspicion(state);
+            clearSuspicion(player, state);
             return;
         }
 
@@ -90,7 +95,7 @@ public final class AirStuckCheck {
         if (!state.worldId.equals(current.getWorld().getUID())) {
             state.worldId = current.getWorld().getUID();
             state.anchor = current.clone();
-            clearSuspicion(state);
+            clearSuspicion(player, state);
             return;
         }
 
@@ -104,7 +109,7 @@ public final class AirStuckCheck {
         // for server implementations where the ground flag is briefly stale.
         if (player.isOnGround() || hasSolidSupport(player) || moved) {
             state.anchor = current.clone();
-            clearSuspicion(state);
+            clearSuspicion(player, state);
             return;
         }
 
@@ -115,6 +120,10 @@ public final class AirStuckCheck {
 
         if (state.stationaryTicks >= requiredTicks) {
             flag(player, state);
+        }
+
+        if (state.flagged) {
+            applyShake(player, state);
         }
     }
 
@@ -206,11 +215,57 @@ public final class AirStuckCheck {
         state.alertedDuringCurrentFlag = true;
     }
 
+    private void applyShake(Player player, PlayerState state) {
+        if (!plugin.getConfig().getBoolean("checks.air-stuck.shake-player", true)) {
+            restoreShake(player, state);
+            return;
+        }
+
+        if (!state.shakeActive) {
+            state.shakeActive = true;
+            state.shakeBaseYaw = player.getYaw();
+            state.shakeBasePitch = player.getPitch();
+        }
+
+        double configuredStrength = plugin.getConfig().getDouble(
+                "checks.air-stuck.shake-strength", 28.0);
+        float strength = (float) Math.max(0.0, Math.min(80.0, configuredStrength));
+        if (strength <= 0.0F) {
+            restoreShake(player, state);
+            return;
+        }
+
+        // Fast alternating yaw/pitch offsets create a strong camera shake
+        // without changing the player's coordinates or affecting movement checks.
+        float yawOffset = (float) (Math.sin(serverTick * 2.4) * strength);
+        float pitchOffset = (float) (Math.cos(serverTick * 2.8) * strength * 0.65);
+        float pitch = Math.max(-89.0F,
+                Math.min(89.0F, state.shakeBasePitch + pitchOffset));
+
+        player.setRotation(state.shakeBaseYaw + yawOffset, pitch);
+    }
+
+    private void restoreShake(Player player, PlayerState state) {
+        if (!state.shakeActive) {
+            return;
+        }
+        if (player != null && player.isOnline() && player.isValid()) {
+            player.setRotation(state.shakeBaseYaw, state.shakeBasePitch);
+        }
+        state.shakeActive = false;
+    }
+
+    private void clearSuspicion(Player player, PlayerState state) {
+        restoreShake(player, state);
+        clearSuspicion(state);
+    }
+
     private void clearSuspicion(PlayerState state) {
         state.flagged = false;
         state.stationaryTicks = 0;
         state.alertedDuringCurrentFlag = false;
         state.nextAlertTick = 0L;
+        state.shakeActive = false;
     }
 
     public boolean isFlagged(Player player) {
@@ -220,14 +275,23 @@ public final class AirStuckCheck {
     }
 
     public void reset(Player player) {
-        states.remove(player.getUniqueId());
+        PlayerState state = states.remove(player.getUniqueId());
+        if (state != null) {
+            clearSuspicion(player, state);
+        }
     }
 
     public void forget(UUID playerId) {
-        states.remove(playerId);
+        PlayerState state = states.remove(playerId);
+        if (state != null) {
+            clearSuspicion(Bukkit.getPlayer(playerId), state);
+        }
     }
 
     public void clearAll() {
+        for (Map.Entry<UUID, PlayerState> entry : states.entrySet()) {
+            clearSuspicion(Bukkit.getPlayer(entry.getKey()), entry.getValue());
+        }
         states.clear();
     }
 
@@ -242,6 +306,9 @@ public final class AirStuckCheck {
         private boolean alertedDuringCurrentFlag;
         private long lastAlertTick;
         private long nextAlertTick;
+        private boolean shakeActive;
+        private float shakeBaseYaw;
+        private float shakeBasePitch;
 
         private PlayerState(Location initialLocation) {
             this.worldId = initialLocation.getWorld().getUID();
