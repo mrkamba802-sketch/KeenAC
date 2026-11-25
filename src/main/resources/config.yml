@@ -22,6 +22,9 @@ checks:
     required-samples: 5
     # Cancel item consumption after a confirmed violation.
     cancel-consume: true
+    # Allow NoSlow to interrupt food use after a confirmed violation.
+    # Set false to keep food use uninterrupted while still detecting NoSlow.
+    reset-food: true
     potion-effects: true
     block-friction: true
 
