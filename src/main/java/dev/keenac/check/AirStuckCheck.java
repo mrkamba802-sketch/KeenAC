@@ -148,7 +148,8 @@ public final class AirStuckCheck {
         }
 
         return player.hasPotionEffect(PotionEffectType.LEVITATION)
-                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
+                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
+                || isInsideCobweb(player);
     }
 
     /**
