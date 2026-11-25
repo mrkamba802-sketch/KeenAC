@@ -58,6 +58,8 @@ checks:
     review-window-ms: 3000
     # Ignore movement shortly after server-side velocity changes (knockback, explosions, etc.).
     velocity-grace-ms: 1200
+    # Ignore Motion samples briefly when elytra gliding starts or stops.
+    glide-grace-ms: 3000
     max-ping-ms: 250
     speed:
       # Sustained horizontal speed must exceed vanilla-derived speed by this multiplier
