@@ -70,10 +70,10 @@ checks:
       vertical-tolerance: 0.015
       velocity-tolerance: 0.035
       confirm-ticks: 12
-    # Motion samples currently generate staff alerts and diagnostics only.
-    # Do not auto-apply a punitive setback based on heuristic movement samples.
+    # On a confirmed Motion violation, return to the latest recent jump origin
+    # and freeze all positional movement for the configured duration.
     setback:
-      enabled: false
+      enabled: true
       # Only use a jump origin saved recently (milliseconds).
       jump-origin-max-age-ms: 3000
       # Hard positional freeze after the rollback (milliseconds).
