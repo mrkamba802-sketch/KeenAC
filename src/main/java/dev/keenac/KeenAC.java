@@ -8,6 +8,7 @@ import dev.keenac.check.AuraCheck;
 import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.MotionCheck;
+import dev.keenac.check.NoFallCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
@@ -32,6 +33,7 @@ public final class KeenAC extends JavaPlugin {
     private AuraCheck auraCheck;
     private ReachCheck reachCheck;
     private MotionCheck motionCheck;
+    private NoFallCheck noFallCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
@@ -60,7 +62,8 @@ public final class KeenAC extends JavaPlugin {
         auraCheck = new AuraCheck(this);
         reachCheck = new ReachCheck(this);
         motionCheck = new MotionCheck(this);
-        packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck);
+        noFallCheck = new NoFallCheck(this);
+        packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck, noFallCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
         auraPacketListener = new PacketAuraListener(auraCheck);
@@ -77,6 +80,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(auraCheck, this);
         Bukkit.getPluginManager().registerEvents(reachCheck, this);
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
+        Bukkit.getPluginManager().registerEvents(noFallCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoWebCheck(this), this);
@@ -90,6 +94,7 @@ public final class KeenAC extends JavaPlugin {
             auraCheck.tick();
             reachCheck.tick();
             motionCheck.tick();
+            noFallCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
     }
@@ -134,6 +139,7 @@ public final class KeenAC extends JavaPlugin {
         if (auraCheck != null) auraCheck.clearAll();
         if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
+        if (noFallCheck != null) noFallCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
