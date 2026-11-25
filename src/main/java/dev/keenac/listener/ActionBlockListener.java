@@ -1,6 +1,7 @@
 package dev.keenac.listener;
 
 import dev.keenac.check.AirStuckCheck;
+import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.Cancellable;
@@ -110,6 +111,11 @@ public final class ActionBlockListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onProjectileLaunch(ProjectileLaunchEvent event) {
+        // A previously raised AirStuck flag must not prevent a legitimate pearl
+        // throw. The resulting teleport will reset the active AirStuck suspicion.
+        if (event.getEntity() instanceof EnderPearl) {
+            return;
+        }
         if (event.getEntity().getShooter() instanceof Player player) {
             cancelIfFlagged(player, event);
         }
