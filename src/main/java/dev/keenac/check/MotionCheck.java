@@ -19,6 +19,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.vehicle.VehicleEnterEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -156,7 +157,7 @@ public final class MotionCheck implements Listener {
                 || player.isSwimming() || player.isRiptiding()
                 || player.getGameMode() == GameMode.CREATIVE
                 || player.getGameMode() == GameMode.SPECTATOR
-                || player.getOpenInventory().getTopInventory().getType().isCreatable()) {
+                || player.getOpenInventory().getType() != InventoryType.CRAFTING) {
             return false;
         }
 
@@ -177,7 +178,7 @@ public final class MotionCheck implements Listener {
 
     private boolean isSpecialMovementMaterial(Material material) {
         String name = material.name();
-        return material.isLiquid()
+        return material == Material.WATER || material == Material.LAVA
                 || name.contains("ICE")
                 || name.contains("SLIME")
                 || name.contains("HONEY")
