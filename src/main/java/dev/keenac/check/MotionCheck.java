@@ -1,11 +1,12 @@
 package dev.keenac.check;
 
+import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
-import org.bukkit.Location;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -30,20 +31,18 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Collects legitimate movement context and aggregates externally supplied
- * motion-suspicion samples for staff review.
- *
- * This class does not decide whether movement is invalid. When an external
- * trusted component reaches the configured threshold, it may apply a single
- * small rollback to the immediately previous movement position.
+ * Collects movement context and aggregates externally supplied motion-suspicion
+ * samples. At the configured threshold it returns the player to the latest
+ * jump origin and prevents positional movement for a short review period.
  */
 public final class MotionCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, Deque<Long>> suspicionTimes = new HashMap<>();
     private final Map<UUID, Long> reviewUntil = new HashMap<>();
     private final Map<UUID, Long> lastVelocityAt = new HashMap<>();
-    private final Map<UUID, Location> lastMovementFrom = new HashMap<>();
-    private final Map<UUID, Long> lastMovementAt = new HashMap<>();
+    private final Map<UUID, Location> lastJumpOrigin = new HashMap<>();
+    private final Map<UUID, Long> lastJumpAt = new HashMap<>();
+    private final Map<UUID, Long> frozenUntil = new HashMap<>();
     private final Set<UUID> pendingSetbacks = new HashSet<>();
     private final Set<UUID> applyingSetbacks = new HashSet<>();
 
@@ -53,9 +52,8 @@ public final class MotionCheck implements Listener {
 
     /**
      * Submit a suspicion signal from a trusted movement-analysis component.
-     * Bukkit state is read on the main server thread. Reaching the configured
-     * signal threshold may schedule one small, bounded setback; this class is
-     * still an integration point and does not generate movement heuristics.
+     * Reaching the configured threshold schedules a return to the last jump
+     * origin followed by a strict positional freeze.
      */
     public void recordSuspicion(Player player, String reason) {
         if (player == null) {
@@ -102,16 +100,14 @@ public final class MotionCheck implements Listener {
                         + describeMovementContext(player, now));
             }
             if (plugin.getConfig().getBoolean("checks.motion.setback.enabled", true)) {
-                scheduleLightSetback(player);
+                scheduleHardSetback(player);
             }
         }
         reviewUntil.put(id, now + reviewWindow);
     }
 
     /**
-     * Returns a diagnostic snapshot. The effective movement attribute,
-     * configured walk/fly speeds, potion effects, recent velocity event and
-     * common movement states are exposed for human review.
+     * Diagnostic snapshot for staff review.
      */
     public String describeMovementContext(Player player) {
         return describeMovementContext(player, System.currentTimeMillis());
@@ -168,27 +164,72 @@ public final class MotionCheck implements Listener {
     }
 
     /**
-     * Keep only the immediately preceding movement position. A Motion setback
-     * can therefore undo at most one recent, small movement step.
+     * Paper reports the exact location the player jumped from. Preserve it
+     * until the next jump or until the player's movement context is reset.
      */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        if (event instanceof PlayerTeleportEvent) {
-            return;
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onJump(PlayerJumpEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        if (isFrozen(id, System.currentTimeMillis())) {
+            event.setCancelled(true);
         }
-        Location from = event.getFrom();
-        Location to = event.getTo();
-        if (to == null || from.getWorld() != to.getWorld()
-                || from.distanceSquared(to) < 1.0E-6) {
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void recordJumpOrigin(PlayerJumpEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        lastJumpOrigin.put(id, event.getFrom().clone());
+        lastJumpAt.put(id, System.currentTimeMillis());
+    }
+
+    /**
+     * During the freeze, reject every positional delta, including sub-block
+     * movement. Rotation is retained so the player can still look around.
+     * Teleports are handled separately and are not treated as ordinary moves.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void enforceFreeze(PlayerMoveEvent event) {
+        if (event instanceof PlayerTeleportEvent) {
             return;
         }
 
         UUID id = event.getPlayer().getUniqueId();
-        lastMovementFrom.put(id, from.clone());
-        lastMovementAt.put(id, System.currentTimeMillis());
+        if (!isFrozen(id, System.currentTimeMillis())) {
+            return;
+        }
+
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (to == null || from.getWorld() != to.getWorld()) {
+            return;
+        }
+
+        boolean positionChanged = Double.compare(from.getX(), to.getX()) != 0
+                || Double.compare(from.getY(), to.getY()) != 0
+                || Double.compare(from.getZ(), to.getZ()) != 0;
+        if (!positionChanged) {
+            return;
+        }
+
+        Location locked = from.clone();
+        locked.setYaw(to.getYaw());
+        locked.setPitch(to.getPitch());
+        event.setTo(locked);
     }
 
-    private void scheduleLightSetback(Player player) {
+    private boolean isFrozen(UUID id, long now) {
+        Long until = frozenUntil.get(id);
+        if (until == null) {
+            return false;
+        }
+        if (now >= until) {
+            frozenUntil.remove(id, until);
+            return false;
+        }
+        return true;
+    }
+
+    private void scheduleHardSetback(Player player) {
         UUID id = player.getUniqueId();
         if (!pendingSetbacks.add(id)) {
             return;
@@ -203,7 +244,7 @@ public final class MotionCheck implements Listener {
                 return;
             }
 
-            // Avoid correcting movement with an expected server-side cause.
+            // Do not fight expected server-side movement modes.
             if (online.isInsideVehicle() || online.isFlying() || online.isGliding()
                     || online.isSwimming() || online.isRiptiding()
                     || online.getGameMode() == org.bukkit.GameMode.CREATIVE
@@ -219,24 +260,18 @@ public final class MotionCheck implements Listener {
                 return;
             }
 
-            Location correction = lastMovementFrom.get(id);
-            long movementAt = lastMovementAt.getOrDefault(id, 0L);
-            long maxAge = Math.max(1L,
-                    plugin.getConfig().getLong("checks.motion.setback.max-age-ms", 300L));
-            if (correction == null || now - movementAt > maxAge
+            Location correction = lastJumpOrigin.get(id);
+            long jumpAt = lastJumpAt.getOrDefault(id, 0L);
+            long jumpMaxAge = Math.max(1L,
+                    plugin.getConfig().getLong("checks.motion.setback.jump-origin-max-age-ms", 3000L));
+            if (correction == null || now - jumpAt > jumpMaxAge
                     || correction.getWorld() == null
                     || correction.getWorld() != online.getWorld()) {
                 return;
             }
 
-            double maxDistance = Math.max(0.05,
-                    plugin.getConfig().getDouble("checks.motion.setback.max-distance", 0.75));
-            Location current = online.getLocation();
-            if (correction.distanceSquared(current) > maxDistance * maxDistance) {
-                return;
-            }
-
             correction = correction.clone();
+            Location current = online.getLocation();
             correction.setYaw(current.getYaw());
             correction.setPitch(current.getPitch());
 
@@ -248,26 +283,34 @@ public final class MotionCheck implements Listener {
                 applyingSetbacks.remove(id);
             }
 
-            lastMovementFrom.remove(id);
-            lastMovementAt.remove(id);
-            if (!applied) {
-                plugin.getLogger().fine("Motion light setback could not be applied to "
+            if (applied) {
+                long freezeDuration = Math.max(1L,
+                        plugin.getConfig().getLong("checks.motion.setback.freeze-duration-ms", 1500L));
+                frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
+                online.setVelocity(new Vector(0.0, 0.0, 0.0));
+                lastJumpOrigin.remove(id);
+                lastJumpAt.remove(id);
+            } else {
+                plugin.getLogger().fine("Motion hard setback could not be applied to "
                         + online.getName() + ".");
             }
         });
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onVelocity(PlayerVelocityEvent event) {
-        lastVelocityAt.put(event.getPlayer().getUniqueId(), System.currentTimeMillis());
+        UUID id = event.getPlayer().getUniqueId();
+        if (isFrozen(id, System.currentTimeMillis())) {
+            event.setVelocity(new Vector(0.0, 0.0, 0.0));
+            return;
+        }
+        lastVelocityAt.put(id, System.currentTimeMillis());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         if (applyingSetbacks.contains(id)) {
-            lastMovementFrom.remove(id);
-            lastMovementAt.remove(id);
             return;
         }
         clear(id);
@@ -297,8 +340,9 @@ public final class MotionCheck implements Listener {
         suspicionTimes.remove(id);
         reviewUntil.remove(id);
         lastVelocityAt.remove(id);
-        lastMovementFrom.remove(id);
-        lastMovementAt.remove(id);
+        lastJumpOrigin.remove(id);
+        lastJumpAt.remove(id);
+        frozenUntil.remove(id);
         pendingSetbacks.remove(id);
         applyingSetbacks.remove(id);
     }
@@ -307,8 +351,9 @@ public final class MotionCheck implements Listener {
         suspicionTimes.clear();
         reviewUntil.clear();
         lastVelocityAt.clear();
-        lastMovementFrom.clear();
-        lastMovementAt.clear();
+        lastJumpOrigin.clear();
+        lastJumpAt.clear();
+        frozenUntil.clear();
         pendingSetbacks.clear();
         applyingSetbacks.clear();
     }
