@@ -18,7 +18,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
-import org.bukkit.event.player.PlayerToggleGlideEvent;
+import org.bukkit.event.entity.EntityToggleGlideEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.vehicle.VehicleEnterEvent;
@@ -625,11 +625,11 @@ public final class MotionCheck implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void preventGlidingWhileFrozen(PlayerToggleGlideEvent event) {
+    public void preventGlidingWhileFrozen(EntityToggleGlideEvent event) {
         // Allow the player to stop gliding, but never allow a new glide to start
         // while a hard setback freeze is active.
-        if (event.isGliding()
-                && isFrozen(event.getPlayer().getUniqueId(), System.currentTimeMillis())) {
+        if (event.getEntity() instanceof Player player && event.isGliding()
+                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
             event.setCancelled(true);
         }
     }
