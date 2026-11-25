@@ -8,8 +8,12 @@ checks:
     stationary-ticks: 10
     movement-tolerance: 0.02
     velocity-tolerance: 0.02
-    # Cancel interactions/actions while the player is flagged.
+    # Cancel interactions, block changes, player damage and item consumption while flagged.
     cancel-actions: true
+    # Apply strong camera shake while AirStuck suspicion is active.
+    shake-player: true
+    # Camera shake strength in degrees (0-80).
+    shake-strength: 28.0
 
   wall-hit:
     enabled: true
