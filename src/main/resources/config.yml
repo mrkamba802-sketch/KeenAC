@@ -40,6 +40,8 @@ checks:
     enabled: true
     # Maximum allowed player displacement in one movement event while inside cobweb.
     max-move-distance: 0.08
+    # Ignore NoWeb during Elytra flight and briefly after a glide transition.
+    elytra-grace-ms: 2500
 
   auto-swap:
     enabled: true
