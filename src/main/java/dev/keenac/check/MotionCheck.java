@@ -58,7 +58,7 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Integer> elytraPing = new ConcurrentHashMap<>();
     private volatile boolean elytraPacketEnabled = true;
     private volatile int elytraPacketMaxPing = 250;
-    private volatile double elytraPacketMaxBps = 34.1;
+    private volatile double elytraPacketMaxBps = 35.1;
     private volatile int elytraPacketConfirmSamples = 2;
     private volatile long elytraPacketCooldownNanos = 1_500_000_000L;
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
@@ -139,7 +139,7 @@ public final class MotionCheck implements Listener {
         elytraPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
         elytraPacketMaxBps = Math.max(1.0,
-                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 34.1));
+                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 35.1));
         elytraPacketConfirmSamples = Math.max(1,
                 plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
         elytraPacketCooldownNanos = Math.max(250L,
