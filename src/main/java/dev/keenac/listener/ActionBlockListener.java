@@ -124,6 +124,9 @@ public final class ActionBlockListener implements Listener {
         // A previously raised AirStuck flag must not prevent a legitimate pearl
         // throw. The resulting teleport will reset the active AirStuck suspicion.
         if (event.getEntity() instanceof EnderPearl) {
+            if (event.getEntity().getShooter() instanceof Player player) {
+                check.grantPearlGrace(player);
+            }
             return;
         }
         if (event.getEntity().getShooter() instanceof Player player) {
