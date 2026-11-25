@@ -47,6 +47,7 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Deque<Long>> suspicionTimes = new HashMap<>();
     private final Map<UUID, Long> reviewUntil = new HashMap<>();
     private final Map<UUID, Long> lastVelocityAt = new HashMap<>();
+    private final Map<UUID, Long> lastGlideChangeAt = new HashMap<>();
     private final Map<UUID, Location> lastJumpOrigin = new HashMap<>();
     private final Map<UUID, Long> lastJumpAt = new HashMap<>();
     private final Map<UUID, Long> frozenUntil = new HashMap<>();
@@ -117,6 +118,7 @@ public final class MotionCheck implements Listener {
         elytraPing.keySet().removeIf(id -> !online.contains(id));
         lastSafePosition.keySet().removeIf(id -> !online.contains(id));
         lastSafeAt.keySet().removeIf(id -> !online.contains(id));
+        lastGlideChangeAt.keySet().removeIf(id -> !online.contains(id));
     }
 
     private void recordSafeGroundPosition(Player player) {
@@ -393,6 +395,12 @@ public final class MotionCheck implements Listener {
     }
 
     private boolean isEligibleForMotionSample(Player player, Location location) {
+        long glideGrace = Math.max(0L,
+                plugin.getConfig().getLong("checks.motion.glide-grace-ms", 3000L));
+        long glideChangedAt = lastGlideChangeAt.getOrDefault(player.getUniqueId(), 0L);
+        if (glideChangedAt > 0L && System.currentTimeMillis() - glideChangedAt <= glideGrace) {
+            return false;
+        }
         if (!player.isOnline() || !player.isValid()
                 || player.isInsideVehicle() || player.isFlying() || player.isGliding()
                 || player.isSwimming() || player.isRiptiding()
@@ -509,7 +517,7 @@ public final class MotionCheck implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> recordSuspicion(player, reason));
             return;
         }
-        if (!player.isOnline()
+        if (!player.isOnline() || player.isGliding()
                 || !plugin.getConfig().getBoolean("checks.motion.enabled", true)) {
             return;
         }
@@ -676,6 +684,22 @@ public final class MotionCheck implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void resetMotionOnGlideChange(EntityToggleGlideEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        UUID id = player.getUniqueId();
+        lastGlideChangeAt.put(id, System.currentTimeMillis());
+        suspicionTimes.remove(id);
+        reviewUntil.remove(id);
+        excessiveSpeedTicks.remove(id);
+        hoveringTicks.remove(id);
+        lastSignalTick.remove(id);
+        samplePositions.remove(id);
+        sampleTimesNanos.remove(id);
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void preventGlidingWhileFrozen(EntityToggleGlideEvent event) {
         // Allow the player to stop gliding, but never allow a new glide to start
@@ -837,6 +861,7 @@ public final class MotionCheck implements Listener {
         suspicionTimes.remove(id);
         reviewUntil.remove(id);
         lastVelocityAt.remove(id);
+        lastGlideChangeAt.remove(id);
         lastJumpOrigin.remove(id);
         lastJumpAt.remove(id);
         frozenUntil.remove(id);
@@ -862,6 +887,7 @@ public final class MotionCheck implements Listener {
         suspicionTimes.clear();
         reviewUntil.clear();
         lastVelocityAt.clear();
+        lastGlideChangeAt.clear();
         lastJumpOrigin.clear();
         lastJumpAt.clear();
         frozenUntil.clear();
