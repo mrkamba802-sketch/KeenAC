@@ -4,7 +4,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
-import dev.keenac.check.AuraCheck;
+import dev.keenac.check.AimCheck;
 import dev.keenac.check.BaritoneCheck;
 import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.InvHitCheck;
@@ -19,7 +19,7 @@ import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
 import dev.keenac.listener.PacketAutoSwapListener;
-import dev.keenac.listener.PacketAuraListener;
+import dev.keenac.listener.PacketAimListener;
 import dev.keenac.listener.PacketBaritoneListener;
 import dev.keenac.listener.PacketInvHitListener;
 import dev.keenac.listener.PacketReachListener;
@@ -33,7 +33,7 @@ public final class KeenAC extends JavaPlugin {
     private AirStuckCheck airStuckCheck;
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private InvHitCheck invHitCheck;
-    private AuraCheck auraCheck;
+    private AimCheck aimCheck;
     private ReachCheck reachCheck;
     private MotionCheck motionCheck;
     private NoFallCheck noFallCheck;
@@ -43,7 +43,7 @@ public final class KeenAC extends JavaPlugin {
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
     private PacketListenerAbstract autoSwapPacketListener;
-    private PacketListenerAbstract auraPacketListener;
+    private PacketListenerAbstract aimPacketListener;
     private PacketListenerAbstract reachPacketListener;
     private PacketListenerAbstract baritonePacketListener;
     private BukkitTask tickTask;
@@ -65,7 +65,7 @@ public final class KeenAC extends JavaPlugin {
         airStuckCheck = new AirStuckCheck(this);
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         invHitCheck = new InvHitCheck(this);
-        auraCheck = new AuraCheck(this);
+        aimCheck = new AimCheck(this);
         reachCheck = new ReachCheck(this);
         motionCheck = new MotionCheck(this);
         noFallCheck = new NoFallCheck(this);
@@ -74,20 +74,20 @@ public final class KeenAC extends JavaPlugin {
         packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck, noFallCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
-        auraPacketListener = new PacketAuraListener(auraCheck);
+        aimPacketListener = new PacketAimListener(aimCheck);
         reachPacketListener = new PacketReachListener(reachCheck);
         baritonePacketListener = new PacketBaritoneListener(baritoneCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
-        PacketEvents.getAPI().getEventManager().registerListener(auraPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(aimPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(reachPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(invHitCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
-        Bukkit.getPluginManager().registerEvents(auraCheck, this);
+        Bukkit.getPluginManager().registerEvents(aimCheck, this);
         Bukkit.getPluginManager().registerEvents(reachCheck, this);
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
         Bukkit.getPluginManager().registerEvents(noFallCheck, this);
@@ -103,7 +103,7 @@ public final class KeenAC extends JavaPlugin {
 
         tickTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
             airStuckCheck.tick();
-            auraCheck.tick();
+            aimCheck.tick();
             reachCheck.tick();
             motionCheck.tick();
             noFallCheck.tick();
@@ -122,7 +122,7 @@ public final class KeenAC extends JavaPlugin {
 
     public void reloadChecks() {
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.reloadSettings();
-        if (auraCheck != null) auraCheck.reloadSettings();
+        if (aimCheck != null) aimCheck.reloadSettings();
         if (reachCheck != null) reachCheck.reloadSettings();
     }
 
@@ -139,8 +139,8 @@ public final class KeenAC extends JavaPlugin {
             if (autoSwapPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(autoSwapPacketListener);
             }
-            if (auraPacketListener != null) {
-                PacketEvents.getAPI().getEventManager().unregisterListener(auraPacketListener);
+            if (aimPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(aimPacketListener);
             }
             if (reachPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(reachPacketListener);
@@ -152,7 +152,7 @@ public final class KeenAC extends JavaPlugin {
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
         if (invHitCheck != null) invHitCheck.clearAll();
-        if (auraCheck != null) auraCheck.clearAll();
+        if (aimCheck != null) aimCheck.clearAll();
         if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
         if (noFallCheck != null) noFallCheck.clearAll();
