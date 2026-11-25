@@ -176,7 +176,11 @@ public final class NoWebCheck implements Listener {
             PlayerState state = entry.getValue();
             // Preserve the previous VL while the player is outside cobwebs.
             // Decay only resumes once the player is back inside the check area.
-            if (!intersectsCobweb(player, player.getLocation())) {
+            boolean inCobweb = intersectsCobweb(player, player.getLocation());
+            if (!inCobweb) {
+                if (state.violationLevel == 0 && !state.locked) {
+                    iterator.remove();
+                }
                 continue;
             }
             if (state.violationLevel > 0
@@ -188,8 +192,7 @@ public final class NoWebCheck implements Listener {
                 }
             }
 
-            if (state.violationLevel == 0 && !state.locked
-                    && !intersectsCobweb(player, player.getLocation())) {
+            if (state.violationLevel == 0 && !state.locked) {
                 iterator.remove();
             }
         }
