@@ -84,13 +84,13 @@ public final class NoSlowCheck implements Listener {
         // Vanilla item-use movement is heavily reduced. Allow a generous margin for
         // latency, collision resolution, and attribute modifiers to avoid false flags.
         double allowed = movementAttribute * 0.2 * 20.0 * seconds + 0.035;
-        boolean suspicious = horizontal > allowed * 2.2 && horizontal > 0.075;
+        boolean suspicious = horizontal > allowed * 2.6 && horizontal > 0.09;
 
         data.lastLocation = event.getTo().clone();
         data.lastSampleNanos = System.nanoTime();
         data.samples = suspicious ? data.samples + 1 : Math.max(0, data.samples - 1);
 
-        int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 5));
+        int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 6));
         if (data.samples >= required) {
             int vl = violations.merge(id, 1, Integer::sum);
             lastViolationNanos.put(id, System.nanoTime());
@@ -210,7 +210,7 @@ public final class NoSlowCheck implements Listener {
             lastAirborneNanos.put(id, now);
             return true;
         }
-        if (now - lastAirborneNanos.getOrDefault(id, 0L) < 400_000_000L) return true;
+        if (now - lastAirborneNanos.getOrDefault(id, 0L) < 600_000_000L) return true;
 
         if (player.isDead() || !player.isValid() || player.isInsideVehicle()
                 || player.isGliding() || player.isSwimming() || player.isFlying()
