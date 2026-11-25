@@ -75,7 +75,17 @@ public final class NoWebCheck implements Listener {
         // turns the speed exploit off is not trapped by stale violation state.
         if (state != null && state.locked) {
             if (!toInWeb) {
-                states.remove(id);
+                // Leaving the cobweb releases movement correction, but the
+                // accumulated VL belongs to this player session and is retained.
+                state.locked = false;
+                state.anchor = null;
+                state.normalMovementSamples = 0;
+                state.lastSafe = to.clone();
+                if (state.violationLevel > 0) {
+                    states.put(id, state);
+                } else {
+                    states.remove(id);
+                }
                 return;
             }
             if (state.anchor == null || state.anchor.getWorld() != from.getWorld()) {
@@ -118,7 +128,17 @@ public final class NoWebCheck implements Listener {
                 state.lastSafe = to.clone();
                 states.put(id, state);
             } else {
-                states.remove(id);
+                // Do not reset xVL when the player leaves the web. The next
+                // entry resumes the same violation counter instead of starting at x1.
+                if (state != null && state.violationLevel > 0) {
+                    state.locked = false;
+                    state.anchor = null;
+                    state.normalMovementSamples = 0;
+                    state.lastSafe = to.clone();
+                    states.put(id, state);
+                } else {
+                    states.remove(id);
+                }
             }
             return;
         }
@@ -154,6 +174,11 @@ public final class NoWebCheck implements Listener {
             }
 
             PlayerState state = entry.getValue();
+            // Preserve the previous VL while the player is outside cobwebs.
+            // Decay only resumes once the player is back inside the check area.
+            if (!intersectsCobweb(player, player.getLocation())) {
+                continue;
+            }
             if (state.violationLevel > 0
                     && now - state.lastViolationNanos >= VIOLATION_DECAY_NANOS) {
                 state.violationLevel--;
