@@ -29,3 +29,18 @@ Detection resets on movement, landing, teleportation, world changes, and exempt 
 Alerts use `&bKeenAC &8» &f<player> &7failed &eAirStuck &8(VL: <level>)`, rate-limited to one per player every 3 seconds.
 
 Operators are not exempt from checks. The `keenac.alerts` permission controls who receives alerts; it does not bypass detection.
+
+
+## Motion diagnostics
+
+The Motion module exposes `KeenAC#getMotionCheck().recordSuspicion(player, reason)`
+for trusted movement-analysis components to submit diagnostic signals. Three
+signals inside the configured rolling window start a staff review; further
+signals refresh the review window. Console diagnostics include active potion
+effects, the effective movement-speed attribute, walk/fly speed settings,
+recent velocity events, and movement states such as flying, gliding, swimming,
+riptiding, and vehicles.
+
+This module is intentionally advisory: it does not calculate movement
+violations on its own and never teleports, freezes, or otherwise restricts a
+player. Signals must be supplied by another component.

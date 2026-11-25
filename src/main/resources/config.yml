@@ -49,6 +49,18 @@ checks:
     window-ms: 1500
     alert-cooldown-ms: 5000
 
+  motion:
+    enabled: true
+    # Three externally supplied suspicion signals inside this rolling window start a staff review.
+    required-suspicions: 3
+    suspicion-window-ms: 3000
+    # Additional signals refresh this informational window; player movement is never restricted.
+    review-window-ms: 3000
+    # Recent velocity events are included as legitimate movement context.
+    velocity-grace-ms: 1200
+    # Log potion effects, effective movement attribute, velocity and movement states to console.
+    log-context: true
+
   aura:
     enabled: true
     # Conservative horizontal facing threshold; repeated hits are required.

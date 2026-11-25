@@ -7,6 +7,7 @@ import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.AuraCheck;
 import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.InvHitCheck;
+import dev.keenac.check.MotionCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
@@ -27,6 +28,7 @@ public final class KeenAC extends JavaPlugin {
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private InvHitCheck invHitCheck;
     private AuraCheck auraCheck;
+    private MotionCheck motionCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
@@ -52,6 +54,7 @@ public final class KeenAC extends JavaPlugin {
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         invHitCheck = new InvHitCheck(this);
         auraCheck = new AuraCheck(this);
+        motionCheck = new MotionCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
@@ -65,6 +68,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(invHitCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(auraCheck, this);
+        Bukkit.getPluginManager().registerEvents(motionCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoWebCheck(this), this);
@@ -78,6 +82,10 @@ public final class KeenAC extends JavaPlugin {
             auraCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
+    }
+
+    public MotionCheck getMotionCheck() {
+        return motionCheck;
     }
 
     public AlertManager getAlertManager() {
@@ -110,6 +118,7 @@ public final class KeenAC extends JavaPlugin {
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
         if (invHitCheck != null) invHitCheck.clearAll();
         if (auraCheck != null) auraCheck.clearAll();
+        if (motionCheck != null) motionCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
