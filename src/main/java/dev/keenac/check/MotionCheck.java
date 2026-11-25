@@ -52,8 +52,11 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Long> sampleTimesNanos = new HashMap<>();
     private final Map<UUID, Integer> excessiveSpeedTicks = new HashMap<>();
     private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
+    private final Map<UUID, Integer> violationLevels = new HashMap<>();
+    private final Map<UUID, Long> lastSignalTick = new HashMap<>();
     private final Set<UUID> pendingSetbacks = new HashSet<>();
     private final Set<UUID> applyingSetbacks = new HashSet<>();
+    private long serverTick;
 
     public MotionCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -65,6 +68,7 @@ public final class MotionCheck implements Listener {
      * anomalies to the rolling suspicion aggregator.
      */
     public void tick() {
+        serverTick++;
         if (!plugin.getConfig().getBoolean("checks.motion.enabled", true)) {
             clearMovementSamples();
             return;
@@ -256,9 +260,9 @@ public final class MotionCheck implements Listener {
     }
 
     /**
-     * Submit a suspicion signal from a trusted movement-analysis component.
-     * Reaching the configured threshold schedules a return to the last jump
-     * origin followed by a strict positional freeze.
+     * Submit one movement anomaly. Multiple signals in the same server tick
+     * are collapsed into one sample so speed and hover cannot double-count.
+     * Every completed review window raises the player's persistent Motion VL.
      */
     public void recordSuspicion(Player player, String reason) {
         if (player == null) {
@@ -273,8 +277,14 @@ public final class MotionCheck implements Listener {
             return;
         }
 
-        long now = System.currentTimeMillis();
         UUID id = player.getUniqueId();
+        long previousSignalTick = lastSignalTick.getOrDefault(id, Long.MIN_VALUE);
+        if (previousSignalTick == serverTick) {
+            return;
+        }
+        lastSignalTick.put(id, serverTick);
+
+        long now = System.currentTimeMillis();
         long sampleWindow = Math.max(1L,
                 plugin.getConfig().getLong("checks.motion.suspicion-window-ms", 3000L));
         int required = Math.max(1,
@@ -293,22 +303,29 @@ public final class MotionCheck implements Listener {
         long reviewWindow = Math.max(1L,
                 plugin.getConfig().getLong("checks.motion.review-window-ms", 3000L));
         long activeUntil = reviewUntil.getOrDefault(id, 0L);
-
-        // Further signals refresh the review window without repeating the
-        // alert or scheduling another setback during the active window.
-        if (now >= activeUntil) {
-            plugin.getAlertManager().send("Motion", player, samples.size());
-            if (plugin.getConfig().getBoolean("checks.motion.log-context", true)) {
-                plugin.getLogger().info("Motion review for " + player.getName()
-                        + " (signals=" + samples.size() + ", reason="
-                        + sanitizeReason(reason) + "): "
-                        + describeMovementContext(player, now));
-            }
-            // Detection is advisory: review the movement context before applying
-            // any punitive action. This keeps heuristic samples from freezing
-            // legitimate players due to unusual but valid movement.
+        if (now < activeUntil) {
+            return;
         }
+
+        int violationLevel = violationLevels.merge(id, 1, (current, one) ->
+                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + one);
+
+        // Consume the evidence used for this alert. A continuing violation must
+        // collect a fresh set of samples before the next xN alert is emitted.
+        samples.clear();
         reviewUntil.put(id, now + reviewWindow);
+
+        plugin.getAlertManager().send("Motion", player, violationLevel);
+        if (plugin.getConfig().getBoolean("checks.motion.log-context", true)) {
+            plugin.getLogger().info("Motion review for " + player.getName()
+                    + " (VL=" + violationLevel + ", reason="
+                    + sanitizeReason(reason) + "): "
+                    + describeMovementContext(player, now));
+        }
+
+        if (plugin.getConfig().getBoolean("checks.motion.setback.enabled", true)) {
+            scheduleHardSetback(player);
+        }
     }
 
     /**
@@ -573,6 +590,8 @@ public final class MotionCheck implements Listener {
         sampleTimesNanos.remove(id);
         excessiveSpeedTicks.remove(id);
         hoveringTicks.remove(id);
+        violationLevels.remove(id);
+        lastSignalTick.remove(id);
     }
 
     public void clearAll() {
