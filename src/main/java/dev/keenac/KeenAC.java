@@ -4,6 +4,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
+import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
@@ -18,6 +19,7 @@ import org.bukkit.scheduler.BukkitTask;
 public final class KeenAC extends JavaPlugin {
 
     private AirStuckCheck airStuckCheck;
+    private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private BukkitTask tickTask;
@@ -37,10 +39,12 @@ public final class KeenAC extends JavaPlugin {
             alertManager.enableForStaff(online);
         }
         airStuckCheck = new AirStuckCheck(this);
+        inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
 
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
+        Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
@@ -65,6 +69,7 @@ public final class KeenAC extends JavaPlugin {
             PacketEvents.getAPI().getEventManager().unregisterListener(packetListener);
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
+        if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
