@@ -142,6 +142,14 @@ checks:
     # This check alerts on repeated automated-looking ground-navigation patterns.
     log-context: true
 
+  scaffold:
+    enabled: true
+    # Advisory placement consistency review only; no actions are cancelled.
+    threshold: 5
+    violation-decay: 0.05
+    cooldown-ms: 1000
+    max-ping-ms: 250
+
   aura:
     enabled: true
     # Conservative horizontal facing threshold; repeated hits are required.
