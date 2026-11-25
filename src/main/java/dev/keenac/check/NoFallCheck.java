@@ -17,8 +17,10 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.GameMode;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.bukkit.util.Vector;
 
 /**
  * PacketEvents NoFall signal. It compares the client's onGround bit with a
@@ -30,6 +32,9 @@ public final class NoFallCheck implements Listener {
     private final Map<UUID, NoFallProfile> profiles = new ConcurrentHashMap<>();
     private final Map<UUID, PacketState> packetStates = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastSafePositions = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastSafePositionAt = new ConcurrentHashMap<>();
+    private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
     private volatile int maxPing = 250;
@@ -37,6 +42,9 @@ public final class NoFallCheck implements Listener {
     private volatile int requiredPackets = 2;
     private volatile long packetWindowNanos = 750_000_000L;
     private volatile long alertCooldownNanos = 2_000_000_000L;
+    private volatile boolean setbackEnabled = true;
+    private volatile long safePositionMaxAgeMillis = 30_000L;
+    private volatile boolean damageEnabled = true;
 
     public NoFallCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -54,6 +62,10 @@ public final class NoFallCheck implements Listener {
                 plugin.getConfig().getLong("checks.no-fall.packet-window-ms", 750L)) * 1_000_000L;
         alertCooldownNanos = Math.max(250L,
                 plugin.getConfig().getLong("checks.no-fall.alert-cooldown-ms", 2000L)) * 1_000_000L;
+        setbackEnabled = plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true);
+        safePositionMaxAgeMillis = Math.max(1000L,
+                plugin.getConfig().getLong("checks.no-fall.setback.safe-position-max-age-ms", 30000L));
+        damageEnabled = plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true);
 
         var online = Bukkit.getOnlinePlayers().stream()
                 .map(Player::getUniqueId)
@@ -68,7 +80,12 @@ public final class NoFallCheck implements Listener {
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION);
             boolean safeSurface = isSafeLandingSurface(location);
-            profiles.put(player.getUniqueId(), new NoFallProfile(
+            UUID id = player.getUniqueId();
+            if (player.isOnGround() && !safeSurface && !exemptMode) {
+                lastSafePositions.put(id, location.clone());
+                lastSafePositionAt.put(id, System.currentTimeMillis());
+            }
+            profiles.put(id, new NoFallProfile(
                     enabled && !exemptMode,
                     player.isOnGround(),
                     safeSurface,
@@ -79,6 +96,8 @@ public final class NoFallCheck implements Listener {
         profiles.keySet().removeIf(id -> !online.contains(id));
         packetStates.keySet().removeIf(id -> !online.contains(id));
         violations.keySet().removeIf(id -> !online.contains(id));
+        lastSafePositions.keySet().removeIf(id -> !online.contains(id));
+        lastSafePositionAt.keySet().removeIf(id -> !online.contains(id));
     }
 
     /**
@@ -158,12 +177,65 @@ public final class NoFallCheck implements Listener {
 
         int vl = violations.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+        boolean setbackApplied = applySetback(player);
+        double appliedDamage = applyFallDamage(player, fallDistance);
         plugin.getAlertManager().send("NoFall", player, vl);
         if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                    "NoFall review for %s (VL=%d, fallDistance=%.2f, clientOnGround=true while airborne)",
-                    player.getName(), vl, fallDistance));
+                    "NoFall review for %s (VL=%d, fallDistance=%.2f, setback=%s, damage=%.1f)",
+                    player.getName(), vl, fallDistance, setbackApplied, appliedDamage));
         }
+    }
+
+    /**
+     * Return the player to the last known safe, grounded position. Internal
+     * teleports are excluded from lifecycle cleanup so the NoFall VL persists.
+     */
+    private boolean applySetback(Player player) {
+        if (!setbackEnabled || !plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true)) {
+            return false;
+        }
+        UUID id = player.getUniqueId();
+        Location safe = lastSafePositions.get(id);
+        long savedAt = lastSafePositionAt.getOrDefault(id, 0L);
+        if (safe == null || safe.getWorld() == null || safe.getWorld() != player.getWorld()
+                || System.currentTimeMillis() - savedAt > safePositionMaxAgeMillis) {
+            return false;
+        }
+
+        Location target = safe.clone();
+        Location current = player.getLocation();
+        target.setYaw(current.getYaw());
+        target.setPitch(current.getPitch());
+        boolean applied;
+        applyingSetbacks.add(id);
+        try {
+            applied = player.teleport(target, PlayerTeleportEvent.TeleportCause.PLUGIN);
+        } finally {
+            applyingSetbacks.remove(id);
+        }
+        if (applied) {
+            player.setFallDistance(0.0f);
+            player.setVelocity(new Vector(0.0, 0.0, 0.0));
+        }
+        return applied;
+    }
+
+    /**
+     * Apply the vanilla-style base fall damage (one point per block beyond
+     * three blocks) when a confirmed NoFall spoof prevented the fall damage.
+     */
+    private double applyFallDamage(Player player, double fallDistance) {
+        if (!damageEnabled || !plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true)
+                || player.isDead()) {
+            return 0.0;
+        }
+        double damage = Math.ceil(Math.max(0.0, fallDistance - 3.0));
+        if (damage <= 0.0) {
+            return 0.0;
+        }
+        player.damage(damage);
+        return damage;
     }
 
     private boolean isSafeLandingSurface(Location location) {
@@ -207,7 +279,11 @@ public final class NoFallCheck implements Listener {
 
     @EventHandler
     public void onTeleport(PlayerTeleportEvent event) {
-        clear(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        if (applyingSetbacks.contains(id)) {
+            return;
+        }
+        clear(id);
     }
 
     @EventHandler
@@ -234,12 +310,18 @@ public final class NoFallCheck implements Listener {
         profiles.remove(id);
         packetStates.remove(id);
         violations.remove(id);
+        lastSafePositions.remove(id);
+        lastSafePositionAt.remove(id);
+        applyingSetbacks.remove(id);
     }
 
     public void clearAll() {
         profiles.clear();
         packetStates.clear();
         violations.clear();
+        lastSafePositions.clear();
+        lastSafePositionAt.clear();
+        applyingSetbacks.clear();
     }
 
     private record NoFallProfile(
