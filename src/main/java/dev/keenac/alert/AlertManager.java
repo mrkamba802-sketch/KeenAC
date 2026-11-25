@@ -41,7 +41,7 @@ public final class AlertManager {
 
         String prefix = plugin.getConfig().getString("alerts.prefix", "&bKeenAC &8»");
         String format = plugin.getConfig().getString(
-                "alerts.format", "{prefix} &f{player} &7failed &e{check} &8(VL: {vl})");
+                "alerts.format", "{prefix} &f{player} &7failed &e{check} &8(VL: x{vl})");
         String message = format
                 .replace("{prefix}", prefix)
                 .replace("{player}", suspect.getName())
