@@ -163,9 +163,6 @@ public final class AirStuckCheck {
             flag(player, state);
         }
 
-        if (state.flagged) {
-            applyShake(player, state);
-        }
     }
 
 
@@ -357,48 +354,8 @@ public final class AirStuckCheck {
         state.alertedDuringCurrentFlag = true;
     }
 
-    private void applyShake(Player player, PlayerState state) {
-        if (!plugin.getConfig().getBoolean("checks.air-stuck.shake-player", true)) {
-            restoreShake(player, state);
-            return;
-        }
-
-        if (!state.shakeActive) {
-            state.shakeActive = true;
-            state.shakeBaseYaw = player.getYaw();
-            state.shakeBasePitch = player.getPitch();
-        }
-
-        double configuredStrength = plugin.getConfig().getDouble(
-                "checks.air-stuck.shake-strength", 28.0);
-        float strength = (float) Math.max(0.0, Math.min(80.0, configuredStrength));
-        if (strength <= 0.0F) {
-            restoreShake(player, state);
-            return;
-        }
-
-        // Fast alternating yaw/pitch offsets create a strong camera shake
-        // without changing the player's coordinates or affecting movement checks.
-        float yawOffset = (float) (Math.sin(serverTick * 2.4) * strength);
-        float pitchOffset = (float) (Math.cos(serverTick * 2.8) * strength * 0.65);
-        float pitch = Math.max(-89.0F,
-                Math.min(89.0F, state.shakeBasePitch + pitchOffset));
-
-        player.setRotation(state.shakeBaseYaw + yawOffset, pitch);
-    }
-
-    private void restoreShake(Player player, PlayerState state) {
-        if (!state.shakeActive) {
-            return;
-        }
-        if (player != null && player.isOnline() && player.isValid()) {
-            player.setRotation(state.shakeBaseYaw, state.shakeBasePitch);
-        }
-        state.shakeActive = false;
-    }
-
     private void clearSuspicion(Player player, PlayerState state) {
-        restoreShake(player, state);
+        // AirStuck is alert-only. It must never change player rotation or input.
         clearSuspicion(state);
     }
 
@@ -407,13 +364,11 @@ public final class AirStuckCheck {
         state.stationaryTicks = 0;
         state.alertedDuringCurrentFlag = false;
         state.nextAlertTick = 0L;
-        state.shakeActive = false;
     }
 
     public boolean isFlagged(Player player) {
-        PlayerState state = states.get(player.getUniqueId());
-        return state != null && state.flagged
-                && plugin.getConfig().getBoolean("checks.air-stuck.cancel-actions", true);
+        // Kept for compatibility with the action listener; AirStuck never blocks players.
+        return false;
     }
 
     public void reset(Player player) {
@@ -452,9 +407,6 @@ public final class AirStuckCheck {
         private boolean alertedDuringCurrentFlag;
         private long lastAlertTick;
         private long nextAlertTick;
-        private boolean shakeActive;
-        private float shakeBaseYaw;
-        private float shakeBasePitch;
 
         private PlayerState(Location initialLocation) {
             this.worldId = initialLocation.getWorld().getUID();

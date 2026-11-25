@@ -19,19 +19,17 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Detects attack attempts while a server-side inventory GUI is open.
+ * Detects attacks while a server-side container is open, plus attacks shortly
+ * after a server-observed click in the client-side player inventory (window 0).
  *
- * On modern Minecraft versions the default E-screen is client-side and is not
- * always announced to the server. Click activity in the personal inventory is
- * therefore tracked briefly as a best-effort signal; open containers are tracked
- * directly through Bukkit inventory lifecycle events.
+ * The vanilla E screen has no dependable "opened" notification to the server;
+ * player-inventory detection therefore remains a bounded best-effort signal.
  */
 public final class InvHitCheck implements Listener {
-    private static final long DEFAULT_PERSONAL_CLICK_GRACE_MILLIS = 450L;
+    private static final long DEFAULT_PERSONAL_CLICK_GRACE_MILLIS = 650L;
 
     private final KeenAC plugin;
     private final Set<UUID> openContainerViews = ConcurrentHashMap.newKeySet();
-    private final Set<UUID> openPersonalViews = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> recentPersonalInventoryActivity = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastAlertNanos = new ConcurrentHashMap<>();
@@ -42,25 +40,20 @@ public final class InvHitCheck implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryOpen(InventoryOpenEvent event) {
-        if (!(event.getPlayer() instanceof Player player)) {
+        if (!(event.getPlayer() instanceof Player player)
+                || event.getView().getType() == InventoryType.CRAFTING) {
             return;
         }
 
         UUID id = player.getUniqueId();
-        if (event.getView().getType() == InventoryType.CRAFTING) {
-            openPersonalViews.add(id);
-            openContainerViews.remove(id);
-        } else {
-            openContainerViews.add(id);
-            openPersonalViews.remove(id);
-        }
+        openContainerViews.add(id);
+        recentPersonalInventoryActivity.remove(id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onInventoryClose(InventoryCloseEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         openContainerViews.remove(id);
-        openPersonalViews.remove(id);
         recentPersonalInventoryActivity.remove(id);
     }
 
@@ -74,7 +67,7 @@ public final class InvHitCheck implements Listener {
 
         if (event.getClickedInventory().getType() == InventoryType.PLAYER
                 || event.getClickedInventory().getType() == InventoryType.CRAFTING) {
-            rememberPersonalInventoryActivity(player);
+            rememberPersonalInventoryActivity(player.getUniqueId());
         }
     }
 
@@ -83,7 +76,7 @@ public final class InvHitCheck implements Listener {
         if (event.getWhoClicked() instanceof Player player
                 && event.getView().getType() == InventoryType.CRAFTING
                 && !event.getRawSlots().isEmpty()) {
-            rememberPersonalInventoryActivity(player);
+            rememberPersonalInventoryActivity(player.getUniqueId());
         }
     }
 
@@ -101,20 +94,27 @@ public final class InvHitCheck implements Listener {
         reportViolation(attacker);
     }
 
-    private void rememberPersonalInventoryActivity(Player player) {
+    /**
+     * Called directly from PacketEvents for a client click on window 0.
+     * Only concurrent data is touched here; no Bukkit entity or inventory calls.
+     */
+    public void recordPersonalInventoryPacket(UUID playerId) {
+        if (playerId != null
+                && plugin.getConfig().getBoolean("checks.inv-hit.enabled", true)) {
+            rememberPersonalInventoryActivity(playerId);
+        }
+    }
+
+    private void rememberPersonalInventoryActivity(UUID playerId) {
         long graceMillis = Math.max(100L,
                 plugin.getConfig().getLong("checks.inv-hit.personal-inventory-click-grace-ms",
                         DEFAULT_PERSONAL_CLICK_GRACE_MILLIS));
-        recentPersonalInventoryActivity.put(player.getUniqueId(),
+        recentPersonalInventoryActivity.put(playerId,
                 System.nanoTime() + graceMillis * 1_000_000L);
     }
 
-    /**
-     * Safe to call from a PacketEvents callback: this method reads only
-     * concurrent collections and does not access Bukkit world/inventory state.
-     */
     public boolean isInventoryOpen(UUID playerId) {
-        if (openContainerViews.contains(playerId) || openPersonalViews.contains(playerId)) {
+        if (openContainerViews.contains(playerId)) {
             return true;
         }
 
@@ -160,7 +160,6 @@ public final class InvHitCheck implements Listener {
 
     private void clear(UUID id) {
         openContainerViews.remove(id);
-        openPersonalViews.remove(id);
         recentPersonalInventoryActivity.remove(id);
         violationLevels.remove(id);
         lastAlertNanos.remove(id);
@@ -168,7 +167,6 @@ public final class InvHitCheck implements Listener {
 
     public void clearAll() {
         openContainerViews.clear();
-        openPersonalViews.clear();
         recentPersonalInventoryActivity.clear();
         violationLevels.clear();
         lastAlertNanos.clear();

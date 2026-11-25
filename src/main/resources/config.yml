@@ -10,12 +10,10 @@ checks:
     movement-tolerance: 0.02
     velocity-tolerance: 0.18
     max-ping-ms: 250
-    # Cancel interactions, block changes, player damage and item consumption while flagged.
-    cancel-actions: true
-    # Apply strong camera shake while AirStuck suspicion is active.
-    shake-player: true
-    # Camera shake strength in degrees (0-80).
-    shake-strength: 28.0
+    # AirStuck is alert-only: it never blocks actions or changes the player's camera.
+    cancel-actions: false
+    shake-player: false
+    shake-strength: 0.0
     # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
     pearl-grace-ticks: 200
 
@@ -43,9 +41,9 @@ checks:
 
   auto-swap:
     enabled: true
-    # Alert-only heuristic using raw inventory packets and large drag operations.
-    # It weighs slot swaps more heavily than quick transfers and cursor clicks.
-    # Alerts are informational only; manual sorting can still need staff review.
+    # Count only accepted number-key HOTBAR_SWAP clicks to a non-selected slot.
+    # PICKUP, QUICK_MOVE, drag and ordinary cursor operations are ignored.
+    # Alerts are informational only; repeated manual sorting can still be legitimate.
     required-swaps: 12
     window-ms: 1000
     alert-cooldown-ms: 5000
@@ -54,9 +52,9 @@ checks:
     enabled: true
     # Cancel attack packets and alert when a player attacks while a server GUI is open.
     cancel-hits: true
-    # The normal E inventory screen is client-side on modern versions; use only a
-    # short post-click window as a best-effort signal for that screen.
-    personal-inventory-click-grace-ms: 450
+    # The normal E inventory screen is client-side; detect window-0 clicks and
+    # retain a short best-effort signal for attacks immediately after a click.
+    personal-inventory-click-grace-ms: 650
 
 alerts:
   enabled: true

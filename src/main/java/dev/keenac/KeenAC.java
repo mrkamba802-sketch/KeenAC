@@ -12,7 +12,6 @@ import dev.keenac.check.NoWebCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
-import dev.keenac.listener.PacketAutoSwapListener;
 import dev.keenac.listener.PacketInvHitListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
@@ -26,7 +25,6 @@ public final class KeenAC extends JavaPlugin {
     private InvHitCheck invHitCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
-    private PacketListenerAbstract autoSwapPacketListener;
     private PacketListenerAbstract invHitPacketListener;
     private BukkitTask tickTask;
 
@@ -48,10 +46,8 @@ public final class KeenAC extends JavaPlugin {
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         invHitCheck = new InvHitCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
-        autoSwapPacketListener = new PacketAutoSwapListener(this, inventoryAutoSwapCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
-        PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
 
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
@@ -80,9 +76,6 @@ public final class KeenAC extends JavaPlugin {
         if (PacketEvents.getAPI() != null) {
             if (packetListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(packetListener);
-            }
-            if (autoSwapPacketListener != null) {
-                PacketEvents.getAPI().getEventManager().unregisterListener(autoSwapPacketListener);
             }
             if (invHitPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(invHitPacketListener);
