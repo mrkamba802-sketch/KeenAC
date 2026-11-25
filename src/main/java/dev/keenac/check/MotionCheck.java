@@ -78,7 +78,7 @@ public final class MotionCheck implements Listener {
 
     /**
      * Called once per server tick. This is the missing input source for Motion:
-     * it samples real server-side positions and submits sustained speed/hover
+     * it samples real server-side positions and submits sustained-hover
      * anomalies to the rolling suspicion aggregator.
      */
     public void tick() {
@@ -354,12 +354,12 @@ public final class MotionCheck implements Listener {
         // evidence while airborne with an Elytra equipped, and clear stale samples.
         if (isElytraMotionExempt(player)) {
             clearMotionEvidence(id);
-            resetMovementSample(id, current, nowNanos);
+            resetMovementSample(id, current);
             return;
         }
 
         if (!isEligibleForMotionSample(player, current)) {
-            resetMovementSample(id, current, nowNanos);
+            resetMovementSample(id, current);
             return;
         }
 
@@ -367,14 +367,14 @@ public final class MotionCheck implements Listener {
         long velocityGrace = Math.max(0L,
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
         if (velocityAt > 0L && System.currentTimeMillis() - velocityAt <= velocityGrace) {
-            resetMovementSample(id, current, nowNanos);
+            resetMovementSample(id, current);
             return;
         }
 
         int maxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
         if (player.getPing() > maxPing) {
-            resetMovementSample(id, current, nowNanos);
+            resetMovementSample(id, current);
             return;
         }
 
