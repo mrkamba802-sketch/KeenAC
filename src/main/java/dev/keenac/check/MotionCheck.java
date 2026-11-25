@@ -603,6 +603,8 @@ public final class MotionCheck implements Listener {
         frozenUntil.clear();
         pendingSetbacks.clear();
         applyingSetbacks.clear();
+        violationLevels.clear();
+        lastSignalTick.clear();
         clearMovementSamples();
     }
 }
