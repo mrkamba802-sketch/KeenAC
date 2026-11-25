@@ -80,6 +80,7 @@ public final class KeenAC extends JavaPlugin {
         tickTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
             airStuckCheck.tick();
             auraCheck.tick();
+            motionCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
     }
