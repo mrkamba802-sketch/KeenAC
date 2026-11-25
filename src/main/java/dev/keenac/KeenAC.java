@@ -14,6 +14,7 @@ import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
 import dev.keenac.check.ReachCheck;
+import dev.keenac.check.ScaffoldCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -37,6 +38,7 @@ public final class KeenAC extends JavaPlugin {
     private MotionCheck motionCheck;
     private NoFallCheck noFallCheck;
     private BaritoneCheck baritoneCheck;
+    private ScaffoldCheck scaffoldCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
@@ -68,6 +70,7 @@ public final class KeenAC extends JavaPlugin {
         motionCheck = new MotionCheck(this);
         noFallCheck = new NoFallCheck(this);
         baritoneCheck = new BaritoneCheck(this);
+        scaffoldCheck = new ScaffoldCheck(this);
         packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck, noFallCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
@@ -89,6 +92,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
         Bukkit.getPluginManager().registerEvents(noFallCheck, this);
         Bukkit.getPluginManager().registerEvents(baritoneCheck, this);
+        Bukkit.getPluginManager().registerEvents(scaffoldCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoWebCheck(this), this);
@@ -153,6 +157,7 @@ public final class KeenAC extends JavaPlugin {
         if (motionCheck != null) motionCheck.clearAll();
         if (noFallCheck != null) noFallCheck.clearAll();
         if (baritoneCheck != null) baritoneCheck.clearAll();
+        if (scaffoldCheck != null) scaffoldCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
