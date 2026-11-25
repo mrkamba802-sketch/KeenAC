@@ -86,7 +86,7 @@ checks:
   elytra-speed:
     enabled: true
     # Flag only when measured 3D flight speed is strictly greater than this BPS.
-    max-bps: 34.1
+    max-bps: 35.1
     # Consecutive over-limit samples to confirm a violation.
     confirm-samples: 2
     max-ping-ms: 250
