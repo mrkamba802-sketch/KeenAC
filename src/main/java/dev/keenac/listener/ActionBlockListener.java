@@ -1,148 +1,34 @@
 package dev.keenac.listener;
 
 import dev.keenac.check.AirStuckCheck;
-import org.bukkit.Material;
-import org.bukkit.entity.EnderPearl;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Projectile;
-import org.bukkit.event.Cancellable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.ProjectileLaunchEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.player.PlayerBucketEmptyEvent;
-import org.bukkit.event.player.PlayerBucketFillEvent;
-import org.bukkit.event.player.PlayerDropItemEvent;
-import org.bukkit.event.player.PlayerFishEvent;
-import org.bukkit.event.player.PlayerInteractEntityEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerItemConsumeEvent;
-import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 
+/**
+ * Applies AirStuck mitigation only to block breaking and placement.
+ * Combat, inventory, item use, and ordinary movement remain untouched.
+ */
 public final class ActionBlockListener implements Listener {
-
     private final AirStuckCheck check;
 
     public ActionBlockListener(AirStuckCheck check) {
         this.check = check;
     }
 
-    private void cancelIfFlagged(Player player, Cancellable event) {
-        if (player != null && check.isFlagged(player)) {
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        if (check.shouldCancelBlockActions() && check.isFlagged(event.getPlayer())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onInteract(PlayerInteractEvent event) {
-        // The right-click event happens before ProjectileLaunchEvent. Allow only
-        // the legitimate Ender Pearl item use even when AirStuck has a stale flag.
-        boolean rightClick = event.getAction() == Action.RIGHT_CLICK_AIR
-                || event.getAction() == Action.RIGHT_CLICK_BLOCK;
-        if (rightClick && event.getItem() != null
-                && event.getItem().getType() == Material.ENDER_PEARL) {
-            check.grantPearlGrace(event.getPlayer());
-            return;
-        }
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onInteractEntity(PlayerInteractEntityEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockBreak(BlockBreakEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBucketEmpty(PlayerBucketEmptyEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBucketFill(PlayerBucketFillEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onDrop(PlayerDropItemEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onConsume(PlayerItemConsumeEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onSwapHands(PlayerSwapHandItemsEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onFish(PlayerFishEvent event) {
-        cancelIfFlagged(event.getPlayer(), event);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            cancelIfFlagged(player, event);
+        if (check.shouldCancelBlockActions() && check.isFlagged(event.getPlayer())) {
+            event.setCancelled(true);
         }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            cancelIfFlagged(player, event);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onDamage(EntityDamageByEntityEvent event) {
-        Player attacker = getAttackingPlayer(event);
-        if (attacker != null) {
-            cancelIfFlagged(attacker, event);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onProjectileLaunch(ProjectileLaunchEvent event) {
-        // A previously raised AirStuck flag must not prevent a legitimate pearl
-        // throw. The resulting teleport will reset the active AirStuck suspicion.
-        if (event.getEntity() instanceof EnderPearl) {
-            if (event.getEntity().getShooter() instanceof Player player) {
-                check.grantPearlGrace(player);
-            }
-            return;
-        }
-        if (event.getEntity().getShooter() instanceof Player player) {
-            cancelIfFlagged(player, event);
-        }
-    }
-
-    private Player getAttackingPlayer(EntityDamageByEntityEvent event) {
-        if (event.getDamager() instanceof Player player) {
-            return player;
-        }
-        if (event.getDamager() instanceof Projectile projectile
-                && projectile.getShooter() instanceof Player player) {
-            return player;
-        }
-        return null;
     }
 }
