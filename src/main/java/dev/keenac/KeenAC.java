@@ -55,7 +55,7 @@ public final class KeenAC extends JavaPlugin {
         invHitCheck = new InvHitCheck(this);
         auraCheck = new AuraCheck(this);
         motionCheck = new MotionCheck(this);
-        packetListener = new PacketAirStuckListener(this, airStuckCheck);
+        packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
         auraPacketListener = new PacketAuraListener(auraCheck);
