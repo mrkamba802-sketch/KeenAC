@@ -14,6 +14,8 @@ checks:
     shake-player: true
     # Camera shake strength in degrees (0-80).
     shake-strength: 28.0
+    # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
+    pearl-grace-ticks: 80
 
   wall-hit:
     enabled: true
