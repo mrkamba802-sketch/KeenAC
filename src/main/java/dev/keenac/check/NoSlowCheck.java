@@ -214,7 +214,9 @@ public final class NoSlowCheck implements Listener {
             // Keep interrupting while recent movement samples still prove NoSlow.
             // As soon as normal movement is observed, lastSuspiciousNanos is cleared
             // and the player can continue using the item without being interrupted.
-            if (player.isHandRaised() && data != null
+            if (player.hasActiveItem() && isTrackedConsumable(player.getActiveItem())
+                    && player.getActiveItem().getType() == tracked
+                    && data != null
                     && data.lastSuspiciousNanos >= data.lastUseAttemptNanos
                     && data.lastSuspiciousNanos > 0L
                     && now - data.lastSuspiciousNanos <= 750_000_000L) {
