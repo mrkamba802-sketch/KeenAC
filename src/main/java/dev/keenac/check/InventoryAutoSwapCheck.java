@@ -6,8 +6,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryAction;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
@@ -39,31 +37,6 @@ public final class InventoryAutoSwapCheck implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player player)
-                || player.getGameMode() == GameMode.CREATIVE
-                || player.isDead()
-                || event.getClickedInventory() == null
-                || !plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
-            return;
-        }
-
-        // Do not filter by clicked inventory: slot swaps against a chest/container
-        // can be sent through the top inventory, not just PlayerInventory.
-        InventoryAction action = event.getAction();
-        int score = switch (action) {
-            case HOTBAR_SWAP, HOTBAR_MOVE_AND_READD, SWAP_WITH_CURSOR -> 2;
-            case MOVE_TO_OTHER_INVENTORY, COLLECT_TO_CURSOR -> 1;
-            default -> 0;
-        };
-        if (score == 0) {
-            return;
-        }
-
-        recordOperation(player, score);
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryDrag(InventoryDragEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)
                 || player.getGameMode() == GameMode.CREATIVE
@@ -77,6 +50,18 @@ public final class InventoryAutoSwapCheck implements Listener {
         if (event.getRawSlots().size() >= 4) {
             recordOperation(player, 1);
         }
+    }
+
+    /**
+     * Called on the Bukkit main thread for a decoded client inventory operation.
+     */
+    public void recordPacketOperation(Player player, int score) {
+        if (player == null || !player.isOnline()
+                || player.getGameMode() == GameMode.CREATIVE || player.isDead()
+                || !plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
+            return;
+        }
+        recordOperation(player, Math.max(1, Math.min(3, score)));
     }
 
     private void recordOperation(Player player, int score) {
