@@ -36,7 +36,7 @@ public final class NoFallCheck implements Listener {
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastSafePositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastSafePositionAt = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastFallDamageAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastFallDamageNanos = new ConcurrentHashMap<>();
     private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
@@ -103,7 +103,7 @@ public final class NoFallCheck implements Listener {
         violations.keySet().removeIf(id -> !online.contains(id));
         lastSafePositions.keySet().removeIf(id -> !online.contains(id));
         lastSafePositionAt.keySet().removeIf(id -> !online.contains(id));
-        lastFallDamageAt.keySet().removeIf(id -> !online.contains(id));
+        lastFallDamageNanos.keySet().removeIf(id -> !online.contains(id));
     }
 
     /**
@@ -131,7 +131,7 @@ public final class NoFallCheck implements Listener {
                 && profile.fallDistance >= minimumFallDistance;
         boolean shouldConfirm = false;
         double candidateDistance = 0.0;
-        long suspectedAtMillis = 0L;
+        long suspectedAtNanos = 0L;
         Location candidateSafePosition = null;
         long candidateSafePositionAt = 0L;
         synchronized (state) {
@@ -140,7 +140,7 @@ public final class NoFallCheck implements Listener {
                 if (candidateFall) {
                     state.firstClaimNanos = now;
                     state.candidateFallDistance = profile.fallDistance;
-                    state.suspectedAtMillis = System.currentTimeMillis();
+                    state.suspectedAtNanos = now;
                     state.candidateSafePosition = copyLocation(profile.lastSafePosition);
                     state.candidateSafePositionAt = profile.lastSafePositionAt;
                     state.claims = 1;
@@ -160,7 +160,7 @@ public final class NoFallCheck implements Listener {
                     && now - state.lastAlertNanos >= alertCooldownNanos) {
                 state.lastAlertNanos = now;
                 candidateDistance = state.candidateFallDistance;
-                suspectedAtMillis = state.suspectedAtMillis;
+                suspectedAtNanos = state.suspectedAtNanos;
                 candidateSafePosition = copyLocation(state.candidateSafePosition);
                 candidateSafePositionAt = state.candidateSafePositionAt;
                 state.resetCandidateOnly();
@@ -170,7 +170,7 @@ public final class NoFallCheck implements Listener {
 
         if (shouldConfirm) {
             final double fallDistance = candidateDistance;
-            final long suspectedAt = suspectedAtMillis;
+            final long suspectedAt = suspectedAtNanos;
             final Location safePosition = candidateSafePosition;
             final long safePositionAt = candidateSafePositionAt;
             Bukkit.getScheduler().runTask(plugin, () -> confirmViolation(
@@ -179,7 +179,7 @@ public final class NoFallCheck implements Listener {
     }
 
     private void confirmViolation(UUID id, double fallDistance, org.bukkit.World packetWorld,
-                                  long suspectedAtMillis, Location safePosition,
+                                  long suspectedAtNanos, Location safePosition,
                                   long safePositionAtMillis) {
         Player player = Bukkit.getPlayer(id);
         if (player == null || !player.isOnline()
@@ -196,7 +196,7 @@ public final class NoFallCheck implements Listener {
         }
 
         // Vanilla already handled the landing; do not apply a second hit.
-        if (lastFallDamageAt.getOrDefault(id, 0L) >= suspectedAtMillis) {
+        if (lastFallDamageNanos.getOrDefault(id, 0L) >= suspectedAtNanos) {
             return;
         }
 
@@ -299,7 +299,7 @@ public final class NoFallCheck implements Listener {
     public void onFallDamage(EntityDamageEvent event) {
         if (event.getEntity() instanceof Player player
                 && event.getCause() == EntityDamageEvent.DamageCause.FALL) {
-            lastFallDamageAt.put(player.getUniqueId(), System.currentTimeMillis());
+            lastFallDamageNanos.put(player.getUniqueId(), System.nanoTime());
         }
     }
 
@@ -338,7 +338,7 @@ public final class NoFallCheck implements Listener {
         violations.remove(id);
         lastSafePositions.remove(id);
         lastSafePositionAt.remove(id);
-        lastFallDamageAt.remove(id);
+        lastFallDamageNanos.remove(id);
         applyingSetbacks.remove(id);
     }
 
@@ -348,7 +348,7 @@ public final class NoFallCheck implements Listener {
         violations.clear();
         lastSafePositions.clear();
         lastSafePositionAt.clear();
-        lastFallDamageAt.clear();
+        lastFallDamageNanos.clear();
         applyingSetbacks.clear();
     }
 
@@ -370,7 +370,7 @@ public final class NoFallCheck implements Listener {
         private long firstClaimNanos;
         private long lastAlertNanos;
         private double candidateFallDistance;
-        private long suspectedAtMillis;
+        private long suspectedAtNanos;
         private Location candidateSafePosition;
         private long candidateSafePositionAt;
         private int claims;
@@ -378,7 +378,7 @@ public final class NoFallCheck implements Listener {
         private void reset() {
             firstClaimNanos = 0L;
             candidateFallDistance = 0.0;
-            suspectedAtMillis = 0L;
+            suspectedAtNanos = 0L;
             candidateSafePosition = null;
             candidateSafePositionAt = 0L;
             claims = 0;
@@ -387,7 +387,7 @@ public final class NoFallCheck implements Listener {
         private void resetCandidateOnly() {
             firstClaimNanos = 0L;
             candidateFallDistance = 0.0;
-            suspectedAtMillis = 0L;
+            suspectedAtNanos = 0L;
             candidateSafePosition = null;
             candidateSafePositionAt = 0L;
             claims = 0;
