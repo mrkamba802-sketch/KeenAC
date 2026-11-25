@@ -6,9 +6,10 @@ checks:
     enabled: true
     # Consecutive server ticks with no position change while server-side
     # vertical velocity confirms the player should be falling.
-    stationary-ticks: 10
+    stationary-ticks: 40
     movement-tolerance: 0.02
-    velocity-tolerance: 0.08
+    velocity-tolerance: 0.18
+    max-ping-ms: 250
     # Cancel interactions, block changes, player damage and item consumption while flagged.
     cancel-actions: true
     # Apply strong camera shake while AirStuck suspicion is active.
@@ -16,7 +17,7 @@ checks:
     # Camera shake strength in degrees (0-80).
     shake-strength: 28.0
     # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
-    pearl-grace-ticks: 80
+    pearl-grace-ticks: 200
 
   wall-hit:
     enabled: true
@@ -48,6 +49,14 @@ checks:
     required-swaps: 12
     window-ms: 1000
     alert-cooldown-ms: 5000
+
+  inv-hit:
+    enabled: true
+    # Cancel attack packets and alert when a player attacks while a server GUI is open.
+    cancel-hits: true
+    # The normal E inventory screen is client-side on modern versions; use only a
+    # short post-click window as a best-effort signal for that screen.
+    personal-inventory-click-grace-ms: 450
 
 alerts:
   enabled: true
