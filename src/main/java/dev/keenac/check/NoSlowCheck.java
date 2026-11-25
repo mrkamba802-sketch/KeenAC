@@ -43,7 +43,18 @@ public final class NoSlowCheck implements Listener {
         Player player = event.getPlayer();
         if (isTrackedConsumable(player.getInventory().getItemInMainHand())
                 || isTrackedConsumable(player.getInventory().getItemInOffHand())) {
-            usingItems.put(player.getUniqueId(), new UseData(player.getLocation().clone(), System.nanoTime(), 0));
+            UUID id = player.getUniqueId();
+            long now = System.nanoTime();
+            UseData data = usingItems.get(id);
+            if (data == null) {
+                usingItems.put(id, new UseData(player.getLocation().clone(), now, 0));
+            } else {
+                // A forced interruption can be followed by another use attempt.
+                // Preserve normal-speed evidence across those attempts.
+                data.lastLocation = player.getLocation().clone();
+                data.lastSampleNanos = now;
+                data.samples = 0;
+            }
         }
     }
 
@@ -54,8 +65,11 @@ public final class NoSlowCheck implements Listener {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
         if (!player.isHandRaised()) {
-            usingItems.remove(id);
-            pendingConsumeCancellation.remove(id);
+            // The check itself may have interrupted item use. Keep the pending
+            // state and samples so we can resume measuring when the player tries again.
+            if (!pendingConsumeCancellation.containsKey(id)) {
+                usingItems.remove(id);
+            }
             return;
         }
         UseData data = usingItems.get(id);
@@ -73,6 +87,8 @@ public final class NoSlowCheck implements Listener {
             data.lastSampleNanos = System.nanoTime();
             data.samples = 0;
             data.normalSamples = 0;
+            data.lastSuspiciousNanos = 0L;
+            pendingConsumeCancellation.remove(id);
             return;
         }
 
@@ -92,11 +108,13 @@ public final class NoSlowCheck implements Listener {
         if (suspicious) {
             data.samples++;
             data.normalSamples = 0;
+            data.lastSuspiciousNanos = System.nanoTime();
         } else {
             data.samples = Math.max(0, data.samples - 1);
             data.normalSamples++;
-            // Several consecutive vanilla-speed samples mean the exploit has stopped.
-            // Clear stale VL and any pending interruption instead of carrying suspicion forward.
+            // The first normal-speed sample immediately stops repeated interruptions.
+            // Three consecutive normal samples also clear the old VL completely.
+            data.lastSuspiciousNanos = 0L;
             if (data.normalSamples >= 3) {
                 violations.remove(id);
                 lastViolationNanos.remove(id);
@@ -171,11 +189,15 @@ public final class NoSlowCheck implements Listener {
                 iterator.remove();
                 continue;
             }
-            if (player.isHandRaised()) {
-                // Interrupt once per confirmed violation. Repeating this every few
-                // seconds traps legitimate users even after their movement is normal.
+            UseData data = usingItems.get(id);
+            long now = System.nanoTime();
+            // Keep interrupting while recent movement samples still prove NoSlow.
+            // As soon as normal movement is observed, lastSuspiciousNanos is cleared
+            // and the player can continue using the item without being interrupted.
+            if (player.isHandRaised() && data != null
+                    && data.lastSuspiciousNanos > 0L
+                    && now - data.lastSuspiciousNanos <= 750_000_000L) {
                 player.clearActiveItem();
-                iterator.remove();
             }
         }
     }
@@ -249,6 +271,7 @@ public final class NoSlowCheck implements Listener {
         private long lastSampleNanos;
         private int samples;
         private int normalSamples;
+        private long lastSuspiciousNanos;
 
         private UseData(org.bukkit.Location location, long now, int samples) {
             this.lastLocation = location;
