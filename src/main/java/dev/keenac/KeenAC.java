@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.AuraCheck;
+import dev.keenac.check.BaritoneCheck;
 import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.MotionCheck;
@@ -18,6 +19,7 @@ import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
 import dev.keenac.listener.PacketAutoSwapListener;
 import dev.keenac.listener.PacketAuraListener;
+import dev.keenac.listener.PacketBaritoneListener;
 import dev.keenac.listener.PacketInvHitListener;
 import dev.keenac.listener.PacketReachListener;
 import dev.keenac.listener.PlayerLifecycleListener;
@@ -34,12 +36,14 @@ public final class KeenAC extends JavaPlugin {
     private ReachCheck reachCheck;
     private MotionCheck motionCheck;
     private NoFallCheck noFallCheck;
+    private BaritoneCheck baritoneCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
     private PacketListenerAbstract autoSwapPacketListener;
     private PacketListenerAbstract auraPacketListener;
     private PacketListenerAbstract reachPacketListener;
+    private PacketListenerAbstract baritonePacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -63,16 +67,19 @@ public final class KeenAC extends JavaPlugin {
         reachCheck = new ReachCheck(this);
         motionCheck = new MotionCheck(this);
         noFallCheck = new NoFallCheck(this);
+        baritoneCheck = new BaritoneCheck(this);
         packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck, noFallCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
         auraPacketListener = new PacketAuraListener(auraCheck);
         reachPacketListener = new PacketReachListener(reachCheck);
+        baritonePacketListener = new PacketBaritoneListener(baritoneCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(auraPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(reachPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(invHitCheck, this);
@@ -81,6 +88,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(reachCheck, this);
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
         Bukkit.getPluginManager().registerEvents(noFallCheck, this);
+        Bukkit.getPluginManager().registerEvents(baritoneCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoWebCheck(this), this);
@@ -95,6 +103,7 @@ public final class KeenAC extends JavaPlugin {
             reachCheck.tick();
             motionCheck.tick();
             noFallCheck.tick();
+            baritoneCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
     }
@@ -132,6 +141,9 @@ public final class KeenAC extends JavaPlugin {
             if (reachPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(reachPacketListener);
             }
+            if (baritonePacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(baritonePacketListener);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
@@ -140,6 +152,7 @@ public final class KeenAC extends JavaPlugin {
         if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
         if (noFallCheck != null) noFallCheck.clearAll();
+        if (baritoneCheck != null) baritoneCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
