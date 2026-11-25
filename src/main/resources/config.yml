@@ -32,6 +32,11 @@ checks:
     potion-effects: true
     block-friction: true
 
+  no-web:
+    enabled: true
+    # Maximum allowed player displacement in one movement event while inside cobweb.
+    max-move-distance: 0.08
+
 alerts:
   enabled: true
   # Minimum delay between alerts for the same player and check.
