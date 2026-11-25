@@ -87,9 +87,10 @@ checks:
 
   elytra-speed:
     enabled: true
-    # Flag only when measured 3D flight speed is strictly greater than this BPS.
-    max-bps: 35.1
-    # Consecutive over-limit samples to confirm a violation.
+    # Maximum allowed averaged 3D flight speed, measured over a 400 ms packet window.
+    # Values below the vanilla high-speed dive range are deliberately avoided.
+    max-bps: 85.0
+    # Consecutive over-limit smoothed windows required to confirm a violation.
     confirm-samples: 2
     max-ping-ms: 250
     alert-cooldown-ms: 1500
