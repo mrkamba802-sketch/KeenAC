@@ -3,6 +3,7 @@ package dev.keenac.check;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
+import org.bukkit.Material;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -148,6 +149,32 @@ public final class AirStuckCheck {
 
         return player.hasPotionEffect(PotionEffectType.LEVITATION)
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
+    }
+
+    /**
+     * A player descending through a cobweb can have almost no packet displacement
+     * for several ticks. Treat any cobweb intersecting the actual player hitbox
+     * as a movement exemption, and clear only the active suspicion (not the VL).
+     */
+    private boolean isInsideCobweb(Player player) {
+        BoundingBox box = player.getBoundingBox();
+        int minX = floor(box.getMinX());
+        int maxX = floor(box.getMaxX() - 1.0E-6);
+        int minY = floor(box.getMinY());
+        int maxY = floor(box.getMaxY() - 1.0E-6);
+        int minZ = floor(box.getMinZ());
+        int maxZ = floor(box.getMaxZ() - 1.0E-6);
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (player.getWorld().getBlockAt(x, y, z).getType() == Material.COBWEB) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private boolean hasSolidSupport(Player player) {
