@@ -10,6 +10,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
@@ -42,7 +43,10 @@ public final class ActionBlockListener implements Listener {
     public void onInteract(PlayerInteractEvent event) {
         // The right-click event happens before ProjectileLaunchEvent. Allow only
         // the legitimate Ender Pearl item use even when AirStuck has a stale flag.
-        if (event.getItem() != null && event.getItem().getType() == Material.ENDER_PEARL) {
+        boolean rightClick = event.getAction() == Action.RIGHT_CLICK_AIR
+                || event.getAction() == Action.RIGHT_CLICK_BLOCK;
+        if (rightClick && event.getItem() != null
+                && event.getItem().getType() == Material.ENDER_PEARL) {
             return;
         }
         cancelIfFlagged(event.getPlayer(), event);
