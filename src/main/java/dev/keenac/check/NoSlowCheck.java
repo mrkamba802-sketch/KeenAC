@@ -215,13 +215,14 @@ public final class NoSlowCheck implements Listener {
     private boolean isExempt(Player player, Block block) {
         UUID id = player.getUniqueId();
         long now = System.nanoTime();
-        // Sprint-jumping preserves horizontal momentum while item use is active.
-        // Ignore airborne movement and a short landing window to avoid false NoSlow flags.
-        if (!player.isOnGround() || player.getVelocity().getY() > 0.08) {
+        // In water, players are normally not grounded. Do not apply the airborne
+        // sprint-jump exemption there: NoSlow must continue sampling swimming movement.
+        boolean inWater = player.isInWater() || player.isSwimming();
+        if (!inWater && (!player.isOnGround() || player.getVelocity().getY() > 0.08)) {
             lastAirborneNanos.put(id, now);
             return true;
         }
-        if (now - lastAirborneNanos.getOrDefault(id, 0L) < 600_000_000L) return true;
+        if (!inWater && now - lastAirborneNanos.getOrDefault(id, 0L) < 600_000_000L) return true;
 
         if (player.isDead() || !player.isValid() || player.isInsideVehicle()
                 || player.isGliding() || player.isFlying() || player.isClimbing()
