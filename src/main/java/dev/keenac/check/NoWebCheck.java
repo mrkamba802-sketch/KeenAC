@@ -64,7 +64,7 @@ public final class NoWebCheck implements Listener {
                 states.remove(id);
                 return;
             }
-            event.setTo(state.anchor.clone());
+            returnToAnchor(event, state);
             countViolation(player, state);
             return;
         }
@@ -97,12 +97,23 @@ public final class NoWebCheck implements Listener {
             if (state.violationLevel >= 2) {
                 state.locked = true;
                 state.anchor = state.lastSafe == null ? from.clone() : state.lastSafe.clone();
-                event.setTo(state.anchor.clone());
+                returnToAnchor(event, state);
             }
             return;
         }
 
         state.lastSafe = to.clone();
+    }
+
+    private void returnToAnchor(PlayerMoveEvent event, PlayerState state) {
+        Location correction = state.anchor.clone();
+        Location requested = event.getTo();
+        if (requested != null) {
+            // Keep camera rotation responsive; only lock the player's coordinates.
+            correction.setYaw(requested.getYaw());
+            correction.setPitch(requested.getPitch());
+        }
+        event.setTo(correction);
     }
 
     private void countViolation(Player player, PlayerState state) {
