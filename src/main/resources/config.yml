@@ -61,12 +61,6 @@ checks:
     # Ignore Motion samples briefly when elytra gliding starts or stops.
     glide-grace-ms: 3000
     max-ping-ms: 250
-    speed:
-      # Sustained horizontal speed must exceed vanilla-derived speed by this multiplier
-      # plus the fixed buffer before it is counted as suspicious.
-      multiplier: 1.45
-      buffer: 0.75
-      confirm-ticks: 3
     hover:
       # Require a sustained near-stationary vertical position while airborne.
       vertical-tolerance: 0.015
