@@ -7,15 +7,18 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import dev.keenac.check.InventoryAutoSwapCheck;
+import dev.keenac.check.GhostMenuCheck;
 import org.bukkit.entity.Player;
 
 /** Packet-only AutoSwap detection. */
 public final class PacketAutoSwapListener extends PacketListenerAbstract {
     private final InventoryAutoSwapCheck check;
+    private final GhostMenuCheck ghostMenuCheck;
 
-    public PacketAutoSwapListener(InventoryAutoSwapCheck check) {
+    public PacketAutoSwapListener(InventoryAutoSwapCheck check, GhostMenuCheck ghostMenuCheck) {
         super(PacketListenerPriority.NORMAL);
         this.check = check;
+        this.ghostMenuCheck = ghostMenuCheck;
     }
 
     @Override
@@ -36,6 +39,9 @@ public final class PacketAutoSwapListener extends PacketListenerAbstract {
         }
 
         WrapperPlayClientClickWindow click = new WrapperPlayClientClickWindow(event);
+        if (click.getWindowId() == 0) {
+            ghostMenuCheck.recordPersonalInventoryClick(player.getUniqueId());
+        }
         if (click.getWindowClickType()
                 != WrapperPlayClientClickWindow.WindowClickType.SWAP) {
             return;
