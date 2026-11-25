@@ -4,6 +4,8 @@ import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.GameMode;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
@@ -19,6 +21,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.event.vehicle.VehicleEnterEvent;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayDeque;
@@ -44,11 +47,211 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Location> lastJumpOrigin = new HashMap<>();
     private final Map<UUID, Long> lastJumpAt = new HashMap<>();
     private final Map<UUID, Long> frozenUntil = new HashMap<>();
+    private final Map<UUID, Location> samplePositions = new HashMap<>();
+    private final Map<UUID, Long> sampleTimesNanos = new HashMap<>();
+    private final Map<UUID, Integer> excessiveSpeedTicks = new HashMap<>();
+    private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
     private final Set<UUID> pendingSetbacks = new HashSet<>();
     private final Set<UUID> applyingSetbacks = new HashSet<>();
 
     public MotionCheck(KeenAC plugin) {
         this.plugin = plugin;
+    }
+
+    /**
+     * Called once per server tick. This is the missing input source for Motion:
+     * it samples real server-side positions and submits sustained speed/hover
+     * anomalies to the rolling suspicion aggregator.
+     */
+    public void tick() {
+        if (!plugin.getConfig().getBoolean("checks.motion.enabled", true)) {
+            clearMovementSamples();
+            return;
+        }
+
+        long nowNanos = System.nanoTime();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            inspectMovement(player, nowNanos);
+        }
+
+        Set<UUID> online = Bukkit.getOnlinePlayers().stream()
+                .map(Player::getUniqueId)
+                .collect(Collectors.toSet());
+        samplePositions.keySet().removeIf(id -> !online.contains(id));
+        sampleTimesNanos.keySet().removeIf(id -> !online.contains(id));
+        excessiveSpeedTicks.keySet().removeIf(id -> !online.contains(id));
+        hoveringTicks.keySet().removeIf(id -> !online.contains(id));
+    }
+
+    private void inspectMovement(Player player, long nowNanos) {
+        UUID id = player.getUniqueId();
+        Location current = player.getLocation();
+
+        if (!isEligibleForMotionSample(player, current)) {
+            resetMovementSample(id, current, nowNanos);
+            return;
+        }
+
+        long velocityAt = lastVelocityAt.getOrDefault(id, 0L);
+        long velocityGrace = Math.max(0L,
+                plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
+        if (velocityAt > 0L && System.currentTimeMillis() - velocityAt <= velocityGrace) {
+            resetMovementSample(id, current, nowNanos);
+            return;
+        }
+
+        int maxPing = Math.max(50,
+                plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
+        if (player.getPing() > maxPing) {
+            resetMovementSample(id, current, nowNanos);
+            return;
+        }
+
+        Location previous = samplePositions.put(id, current.clone());
+        Long previousTime = sampleTimesNanos.put(id, nowNanos);
+        if (previous == null || previousTime == null
+                || previous.getWorld() != current.getWorld()) {
+            excessiveSpeedTicks.remove(id);
+            hoveringTicks.remove(id);
+            return;
+        }
+
+        double elapsedSeconds = (nowNanos - previousTime) / 1_000_000_000.0;
+        if (elapsedSeconds < 0.015 || elapsedSeconds > 0.75) {
+            excessiveSpeedTicks.remove(id);
+            hoveringTicks.remove(id);
+            return;
+        }
+
+        double dx = current.getX() - previous.getX();
+        double dz = current.getZ() - previous.getZ();
+        double horizontalSpeed = Math.sqrt(dx * dx + dz * dz) / elapsedSeconds;
+        double allowedSpeed = getAllowedHorizontalSpeed(player);
+
+        double speedMultiplier = Math.max(1.05,
+                plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.45));
+        double speedBuffer = Math.max(0.0,
+                plugin.getConfig().getDouble("checks.motion.speed.buffer", 0.75));
+        double speedLimit = allowedSpeed * speedMultiplier + speedBuffer;
+
+        if (horizontalSpeed > speedLimit) {
+            int ticks = excessiveSpeedTicks.getOrDefault(id, 0) + 1;
+            excessiveSpeedTicks.put(id, ticks);
+            int requiredTicks = Math.max(2,
+                    plugin.getConfig().getInt("checks.motion.speed.confirm-ticks", 3));
+            if (ticks >= requiredTicks) {
+                recordSuspicion(player, String.format(java.util.Locale.ROOT,
+                        "sustained-horizontal-speed=%.2f-limit=%.2f", horizontalSpeed, speedLimit));
+            }
+        } else {
+            excessiveSpeedTicks.remove(id);
+        }
+
+        inspectHover(player, previous, current);
+    }
+
+    private boolean isEligibleForMotionSample(Player player, Location location) {
+        if (!player.isOnline() || !player.isValid()
+                || player.isInsideVehicle() || player.isFlying() || player.isGliding()
+                || player.isSwimming() || player.isRiptiding()
+                || player.getGameMode() == GameMode.CREATIVE
+                || player.getGameMode() == GameMode.SPECTATOR
+                || player.getOpenInventory().getTopInventory().getType().isCreatable()) {
+            return false;
+        }
+
+        if (player.hasPotionEffect(PotionEffectType.LEVITATION)
+                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)) {
+            return false;
+        }
+
+        return !isSpecialMovementSurface(location)
+                && !isSpecialMovementSurface(location.clone().subtract(0.0, 0.2, 0.0));
+    }
+
+    private boolean isSpecialMovementSurface(Location location) {
+        Material feet = location.getBlock().getType();
+        Material below = location.clone().subtract(0.0, 0.2, 0.0).getBlock().getType();
+        return isSpecialMovementMaterial(feet) || isSpecialMovementMaterial(below);
+    }
+
+    private boolean isSpecialMovementMaterial(Material material) {
+        String name = material.name();
+        return material.isLiquid()
+                || name.contains("ICE")
+                || name.contains("SLIME")
+                || name.contains("HONEY")
+                || name.contains("COBWEB")
+                || name.contains("WEB")
+                || name.contains("POWDER_SNOW")
+                || name.contains("SOUL_SAND")
+                || name.contains("SOUL_SOIL")
+                || name.contains("SCAFFOLDING")
+                || name.contains("LADDER")
+                || name.contains("VINE")
+                || name.contains("BUBBLE_COLUMN");
+    }
+
+    private double getAllowedHorizontalSpeed(Player player) {
+        AttributeInstance movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
+        double speed = movementAttribute == null ? 0.1 : movementAttribute.getValue();
+        // Vanilla walk speed is approximately 4.317 blocks/second at attribute 0.1.
+        speed = Math.max(0.01, speed) * 43.17;
+        if (player.isSprinting()) {
+            speed *= 1.3;
+        }
+
+        PotionEffect speedEffect = player.getPotionEffect(PotionEffectType.SPEED);
+        if (speedEffect != null) {
+            speed *= 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
+        }
+        PotionEffect slowEffect = player.getPotionEffect(PotionEffectType.SLOWNESS);
+        if (slowEffect != null) {
+            speed *= Math.max(0.1, 1.0 - 0.15 * (slowEffect.getAmplifier() + 1));
+        }
+        return speed;
+    }
+
+    private void inspectHover(Player player, Location previous, Location current) {
+        UUID id = player.getUniqueId();
+        if (player.isOnGround()
+                || player.hasPotionEffect(PotionEffectType.JUMP_BOOST)
+                || player.isInsideVehicle()) {
+            hoveringTicks.remove(id);
+            return;
+        }
+
+        double verticalDelta = Math.abs(current.getY() - previous.getY());
+        double verticalTolerance = Math.max(0.001,
+                plugin.getConfig().getDouble("checks.motion.hover.vertical-tolerance", 0.015));
+        double velocityTolerance = Math.max(0.001,
+                plugin.getConfig().getDouble("checks.motion.hover.velocity-tolerance", 0.035));
+        if (verticalDelta <= verticalTolerance
+                && Math.abs(player.getVelocity().getY()) <= velocityTolerance) {
+            int ticks = hoveringTicks.getOrDefault(id, 0) + 1;
+            hoveringTicks.put(id, ticks);
+            int requiredTicks = Math.max(8,
+                    plugin.getConfig().getInt("checks.motion.hover.confirm-ticks", 12));
+            if (ticks >= requiredTicks) {
+                recordSuspicion(player, "sustained-midair-hover");
+            }
+        } else {
+            hoveringTicks.remove(id);
+        }
+    }
+
+    private void resetMovementSample(UUID id, Location location, long nowNanos) {
+        samplePositions.put(id, location.clone());
+        sampleTimesNanos.put(id, nowNanos);
+        excessiveSpeedTicks.remove(id);
+        hoveringTicks.remove(id);
+    }
+
+    private void clearMovementSamples() {
+        samplePositions.clear();
+        sampleTimesNanos.clear();
+        excessiveSpeedTicks.clear();
+        hoveringTicks.clear();
     }
 
     /**
@@ -100,9 +303,9 @@ public final class MotionCheck implements Listener {
                         + sanitizeReason(reason) + "): "
                         + describeMovementContext(player, now));
             }
-            if (plugin.getConfig().getBoolean("checks.motion.setback.enabled", true)) {
-                scheduleHardSetback(player);
-            }
+            // Detection is advisory: review the movement context before applying
+            // any punitive action. This keeps heuristic samples from freezing
+            // legitimate players due to unusual but valid movement.
         }
         reviewUntil.put(id, now + reviewWindow);
     }
@@ -365,6 +568,10 @@ public final class MotionCheck implements Listener {
         frozenUntil.remove(id);
         pendingSetbacks.remove(id);
         applyingSetbacks.remove(id);
+        samplePositions.remove(id);
+        sampleTimesNanos.remove(id);
+        excessiveSpeedTicks.remove(id);
+        hoveringTicks.remove(id);
     }
 
     public void clearAll() {
@@ -376,5 +583,6 @@ public final class MotionCheck implements Listener {
         frozenUntil.clear();
         pendingSetbacks.clear();
         applyingSetbacks.clear();
+        clearMovementSamples();
     }
 }
