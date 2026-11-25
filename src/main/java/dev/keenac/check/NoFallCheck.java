@@ -95,14 +95,15 @@ public final class NoFallCheck implements Listener {
 
         long now = System.nanoTime();
         PacketState state = packetStates.computeIfAbsent(id, ignored -> new PacketState());
-        if (!clientOnGround || profile.serverOnGround || profile.safeSurface) {
+        if (!clientOnGround || profile.safeSurface) {
             synchronized (state) {
                 state.reset();
             }
             return;
         }
 
-        boolean candidateFall = profile.fallDistance >= minimumFallDistance;
+        boolean candidateFall = !profile.serverOnGround
+                && profile.fallDistance >= minimumFallDistance;
         boolean shouldConfirm = false;
         double candidateDistance = 0.0;
         synchronized (state) {
@@ -144,7 +145,6 @@ public final class NoFallCheck implements Listener {
         if (player == null || !player.isOnline()
                 || !plugin.getConfig().getBoolean("checks.no-fall.enabled", true)
                 || player.getWorld() != packetWorld
-                || player.isOnGround()
                 || player.isInsideVehicle() || player.isFlying() || player.isGliding()
                 || player.isSwimming() || player.isRiptiding() || player.isInWater()
                 || player.getGameMode() == GameMode.CREATIVE
