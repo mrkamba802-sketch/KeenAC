@@ -5,6 +5,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -59,11 +61,14 @@ public final class NoWebCheck implements Listener {
             return;
         }
 
-        double maxDistance = Math.max(0.01,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.08));
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
+        long now = System.nanoTime();
+        double maxDistance = getAllowedMoveDistance(player, state, now);
+        if (state != null) {
+            state.lastMovementNanos = now;
+        }
 
         // Once VL reaches x2, only unusually large movement remains blocked.
         // Normal-sized movement immediately releases the anchor so a player who
@@ -159,6 +164,37 @@ public final class NoWebCheck implements Listener {
         }
     }
 
+    /**
+     * Cobweb movement is roughly one quarter of normal walking speed, but the
+     * player's effective movement attribute still changes with sprinting,
+     * Speed effects and server-side attribute modifiers. PlayerMoveEvent can
+     * also represent more than one tick after packet delay, so scale the
+     * allowance by the observed interval instead of using one fixed packet
+     * distance for every player and every connection.
+     */
+    private double getAllowedMoveDistance(Player player, PlayerState state, long now) {
+        double configured = Math.max(0.01,
+                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.08));
+
+        double speedMultiplier = 1.0;
+        AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
+        if (movementSpeed != null && movementSpeed.getBaseValue() > 0.0) {
+            speedMultiplier = movementSpeed.getValue() / movementSpeed.getBaseValue();
+            // Avoid nonsensical values while preserving legitimate attribute/effect boosts.
+            speedMultiplier = Math.max(0.75, Math.min(4.0, speedMultiplier));
+        }
+
+        double elapsedTickMultiplier = 1.0;
+        if (state != null && state.lastMovementNanos > 0L) {
+            double elapsedTicks = (now - state.lastMovementNanos) / 50_000_000.0;
+            // A delayed movement packet may cover several server ticks.
+            // The cap prevents a long idle period from creating a huge allowance.
+            elapsedTickMultiplier = Math.max(1.0, Math.min(4.0, elapsedTicks));
+        }
+
+        return configured * speedMultiplier * elapsedTickMultiplier + 0.01;
+    }
+
     private void returnToAnchor(PlayerMoveEvent event, PlayerState state) {
         Location correction = state.anchor.clone();
         Location requested = event.getTo();
@@ -222,10 +258,12 @@ public final class NoWebCheck implements Listener {
         private int violationLevel;
         private long lastViolationTick = Long.MIN_VALUE;
         private long lastViolationNanos;
+        private long lastMovementNanos;
         private boolean locked;
 
         private PlayerState(Location initialLocation) {
             this.lastSafe = initialLocation.clone();
+            this.lastMovementNanos = System.nanoTime();
         }
     }
 }
