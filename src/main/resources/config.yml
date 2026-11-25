@@ -51,13 +51,20 @@ checks:
 
   motion:
     enabled: true
-    # Three externally supplied suspicion signals inside this rolling window start a staff review.
-    required-suspicions: 3
+    # Five externally supplied suspicion signals inside this rolling window trigger review.
+    required-suspicions: 5
     suspicion-window-ms: 3000
-    # Additional signals refresh this informational window; player movement is never restricted.
+    # Further signals refresh the review cooldown and prevent repeated setbacks during it.
     review-window-ms: 3000
-    # Recent velocity events are included as legitimate movement context.
+    # Recent velocity events are included as legitimate movement context and suppress setback.
     velocity-grace-ms: 1200
+    # Apply at most one small rollback when the fifth signal is reached.
+    setback:
+      enabled: true
+      # Only use a movement position recorded very recently.
+      max-age-ms: 300
+      # Roll back at most one small movement step; skip larger corrections.
+      max-distance: 0.75
     # Log potion effects, effective movement attribute, velocity and movement states to console.
     log-context: true
 
