@@ -4,10 +4,11 @@
 checks:
   air-stuck:
     enabled: true
-    # Number of consecutive server ticks without valid movement before flagging.
+    # Consecutive server ticks with no position change while server-side
+    # vertical velocity confirms the player should be falling.
     stationary-ticks: 10
     movement-tolerance: 0.02
-    velocity-tolerance: 0.02
+    velocity-tolerance: 0.08
     # Cancel interactions, block changes, player damage and item consumption while flagged.
     cancel-actions: true
     # Apply strong camera shake while AirStuck suspicion is active.
@@ -43,9 +44,10 @@ checks:
     enabled: true
     # Alert-only heuristic. Counts repeated inventory slot-swap operations,
     # not ordinary clicks, shift-click transfers or drag events.
-    # High thresholds are intentional to reduce alerts during manual sorting.
-    required-swaps: 15
-    window-ms: 900
+    # Weighted burst threshold across cursor swaps, hotbar swaps and quick transfers.
+    # Alerts are informational only; manual sorting can still need staff review.
+    required-swaps: 12
+    window-ms: 1000
     alert-cooldown-ms: 5000
 
 alerts:
