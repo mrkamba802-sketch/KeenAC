@@ -28,6 +28,7 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, Integer> violations = new HashMap<>();
     private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
     private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
+    private final Map<UUID, Long> lastInterruptionAlertNanos = new HashMap<>();
     private final Map<UUID, Long> lastAirborneNanos = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
@@ -49,11 +50,15 @@ public final class NoSlowCheck implements Listener {
             if (data == null) {
                 usingItems.put(id, new UseData(player.getLocation().clone(), now, 0));
             } else {
-                // A forced interruption can be followed by another use attempt.
-                // Preserve normal-speed evidence across those attempts.
+                // A new attempt must be judged from fresh movement samples.
+                // Old suspicious samples must not keep interrupting a player
+                // who has already disabled the speed exploit.
                 data.lastLocation = player.getLocation().clone();
                 data.lastSampleNanos = now;
+                data.lastUseAttemptNanos = now;
                 data.samples = 0;
+                data.normalSamples = 0;
+                data.lastSuspiciousNanos = 0L;
             }
         }
     }
@@ -126,9 +131,7 @@ public final class NoSlowCheck implements Listener {
 
         int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 6));
         if (data.samples >= required) {
-            int vl = violations.merge(id, 1, Integer::sum);
-            lastViolationNanos.put(id, System.nanoTime());
-            plugin.getAlertManager().send("NoSlow", player, vl);
+            recordViolation(player);
             data.samples = 0;
             if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && vl >= 3) {
                 Material used = getTrackedItemType(player);
@@ -142,16 +145,23 @@ public final class NoSlowCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         Material pendingType = pendingConsumeCancellation.get(id);
         UseData data = usingItems.get(id);
+        long now = System.nanoTime();
         boolean recentlySuspicious = data != null && data.lastSuspiciousNanos > 0L
-                && System.nanoTime() - data.lastSuspiciousNanos <= 750_000_000L;
+                && data.lastSuspiciousNanos >= data.lastUseAttemptNanos
+                && now - data.lastSuspiciousNanos <= 750_000_000L;
         if (pendingType != null && recentlySuspicious
                 && event.getItem().getType() == pendingType
                 && shouldCancelConsume(pendingType)) {
             event.setCancelled(true);
             event.getPlayer().clearActiveItem();
+            // Keep the check active after a cancelled consume. Each renewed,
+            // freshly confirmed NoSlow attempt can produce the next VL alert.
+            recordInterruptionViolation(event.getPlayer());
+            return;
         }
         pendingConsumeCancellation.remove(id);
         usingItems.remove(id);
+        lastInterruptionAlertNanos.remove(id);
     }
 
     public void clear(UUID id) {
@@ -159,6 +169,7 @@ public final class NoSlowCheck implements Listener {
         violations.remove(id);
         lastViolationNanos.remove(id);
         pendingConsumeCancellation.remove(id);
+        lastInterruptionAlertNanos.remove(id);
         lastAirborneNanos.remove(id);
     }
 
@@ -167,6 +178,7 @@ public final class NoSlowCheck implements Listener {
         violations.clear();
         lastViolationNanos.clear();
         pendingConsumeCancellation.clear();
+        lastInterruptionAlertNanos.clear();
         lastAirborneNanos.clear();
     }
 
@@ -199,11 +211,31 @@ public final class NoSlowCheck implements Listener {
             // As soon as normal movement is observed, lastSuspiciousNanos is cleared
             // and the player can continue using the item without being interrupted.
             if (player.isHandRaised() && data != null
+                    && data.lastSuspiciousNanos >= data.lastUseAttemptNanos
                     && data.lastSuspiciousNanos > 0L
                     && now - data.lastSuspiciousNanos <= 750_000_000L) {
                 player.clearActiveItem();
+                recordInterruptionViolation(player);
             }
         }
+    }
+
+    private void recordViolation(Player player) {
+        UUID id = player.getUniqueId();
+        int vl = violations.merge(id, 1, Integer::sum);
+        lastViolationNanos.put(id, System.nanoTime());
+        plugin.getAlertManager().send("NoSlow", player, vl);
+    }
+
+    private void recordInterruptionViolation(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.nanoTime();
+        long last = lastInterruptionAlertNanos.getOrDefault(id, 0L);
+        // Guard against the consume event and the 1-tick enforcement task
+        // reporting the same interruption twice.
+        if (now - last < 250_000_000L) return;
+        lastInterruptionAlertNanos.put(id, now);
+        recordViolation(player);
     }
 
     private void decayViolations() {
@@ -276,10 +308,12 @@ public final class NoSlowCheck implements Listener {
         private int samples;
         private int normalSamples;
         private long lastSuspiciousNanos;
+        private long lastUseAttemptNanos;
 
         private UseData(org.bukkit.Location location, long now, int samples) {
             this.lastLocation = location;
             this.lastSampleNanos = now;
+            this.lastUseAttemptNanos = now;
             this.samples = samples;
         }
     }
