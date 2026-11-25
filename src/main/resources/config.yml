@@ -150,15 +150,21 @@ checks:
     cooldown-ms: 1000
     max-ping-ms: 250
 
-  aura:
+  aim:
     enabled: true
-    # Conservative horizontal facing threshold; repeated hits are required.
-    max-angle-degrees: 110.0
-    required-hits: 3
-    window-ms: 1500
-    flag-duration-ms: 900
+    # Aim is advisory: it alerts staff and never cancels an attack by itself.
+    observation-window-ms: 8000
+    # Review repeated accurate attacks against targets that are actually moving.
+    accurate-angle-degrees: 3.5
+    very-accurate-angle-degrees: 1.4
+    minimum-target-speed: 0.08
+    required-moving-hits: 8
+    # Rotation approach and consistency are supporting signals, never standalone flags.
+    required-smooth-approaches: 4
+    stable-angle-deviation: 0.65
+    # Skip unreliable samples during high-latency play.
+    max-ping-ms: 250
     alert-cooldown-ms: 5000
-    max-distance: 5.0
 
   reach:
     enabled: true
