@@ -75,7 +75,7 @@ public final class MotionCheck implements Listener {
         long sampleWindow = Math.max(1L,
                 plugin.getConfig().getLong("checks.motion.suspicion-window-ms", 3000L));
         int required = Math.max(1,
-                plugin.getConfig().getInt("checks.motion.required-suspicions", 3));
+                plugin.getConfig().getInt("checks.motion.required-suspicions", 5));
 
         Deque<Long> samples = suspicionTimes.computeIfAbsent(id, ignored -> new ArrayDeque<>());
         while (!samples.isEmpty() && now - samples.peekFirst() > sampleWindow) {
@@ -91,8 +91,8 @@ public final class MotionCheck implements Listener {
                 plugin.getConfig().getLong("checks.motion.review-window-ms", 3000L));
         long activeUntil = reviewUntil.getOrDefault(id, 0L);
 
-        // Further signals refresh the informational review window without
-        // sending repeated alerts or applying any player-side effect.
+        // Further signals refresh the review window without repeating the
+        // alert or scheduling another setback during the active window.
         if (now >= activeUntil) {
             plugin.getAlertManager().send("Motion", player, samples.size());
             if (plugin.getConfig().getBoolean("checks.motion.log-context", true)) {
