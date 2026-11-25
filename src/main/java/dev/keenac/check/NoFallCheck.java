@@ -8,7 +8,9 @@ import org.bukkit.block.Block;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -34,6 +36,7 @@ public final class NoFallCheck implements Listener {
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastSafePositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastSafePositionAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastFallDamageAt = new ConcurrentHashMap<>();
     private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
@@ -91,13 +94,16 @@ public final class NoFallCheck implements Listener {
                     safeSurface,
                     player.getPing(),
                     player.getFallDistance(),
-                    location.getWorld()));
+                    location.getWorld(),
+                    copyLocation(lastSafePositions.get(id)),
+                    lastSafePositionAt.getOrDefault(id, 0L)));
         }
         profiles.keySet().removeIf(id -> !online.contains(id));
         packetStates.keySet().removeIf(id -> !online.contains(id));
         violations.keySet().removeIf(id -> !online.contains(id));
         lastSafePositions.keySet().removeIf(id -> !online.contains(id));
         lastSafePositionAt.keySet().removeIf(id -> !online.contains(id));
+        lastFallDamageAt.keySet().removeIf(id -> !online.contains(id));
     }
 
     /**
@@ -125,12 +131,18 @@ public final class NoFallCheck implements Listener {
                 && profile.fallDistance >= minimumFallDistance;
         boolean shouldConfirm = false;
         double candidateDistance = 0.0;
+        long suspectedAtMillis = 0L;
+        Location candidateSafePosition = null;
+        long candidateSafePositionAt = 0L;
         synchronized (state) {
             if (state.firstClaimNanos == 0L || now - state.firstClaimNanos > packetWindowNanos) {
                 state.reset();
                 if (candidateFall) {
                     state.firstClaimNanos = now;
                     state.candidateFallDistance = profile.fallDistance;
+                    state.suspectedAtMillis = System.currentTimeMillis();
+                    state.candidateSafePosition = copyLocation(profile.lastSafePosition);
+                    state.candidateSafePositionAt = profile.lastSafePositionAt;
                     state.claims = 1;
                 }
             } else {
@@ -148,6 +160,9 @@ public final class NoFallCheck implements Listener {
                     && now - state.lastAlertNanos >= alertCooldownNanos) {
                 state.lastAlertNanos = now;
                 candidateDistance = state.candidateFallDistance;
+                suspectedAtMillis = state.suspectedAtMillis;
+                candidateSafePosition = copyLocation(state.candidateSafePosition);
+                candidateSafePositionAt = state.candidateSafePositionAt;
                 state.resetCandidateOnly();
                 shouldConfirm = true;
             }
@@ -155,11 +170,17 @@ public final class NoFallCheck implements Listener {
 
         if (shouldConfirm) {
             final double fallDistance = candidateDistance;
-            Bukkit.getScheduler().runTask(plugin, () -> confirmViolation(id, fallDistance, profile.world));
+            final long suspectedAt = suspectedAtMillis;
+            final Location safePosition = candidateSafePosition;
+            final long safePositionAt = candidateSafePositionAt;
+            Bukkit.getScheduler().runTask(plugin, () -> confirmViolation(
+                    id, fallDistance, profile.world, suspectedAt, safePosition, safePositionAt));
         }
     }
 
-    private void confirmViolation(UUID id, double fallDistance, org.bukkit.World packetWorld) {
+    private void confirmViolation(UUID id, double fallDistance, org.bukkit.World packetWorld,
+                                  long suspectedAtMillis, Location safePosition,
+                                  long safePositionAtMillis) {
         Player player = Bukkit.getPlayer(id);
         if (player == null || !player.isOnline()
                 || !plugin.getConfig().getBoolean("checks.no-fall.enabled", true)
@@ -170,14 +191,18 @@ public final class NoFallCheck implements Listener {
                 || player.getGameMode() == GameMode.SPECTATOR
                 || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
                 || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)
-                || isSafeLandingSurface(player.getLocation())
-                || hasImmediateSolidSupport(player.getLocation())) {
+                || isSafeLandingSurface(player.getLocation())) {
+            return;
+        }
+
+        // Vanilla already handled the landing; do not apply a second hit.
+        if (lastFallDamageAt.getOrDefault(id, 0L) >= suspectedAtMillis) {
             return;
         }
 
         int vl = violations.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-        boolean setbackApplied = applySetback(player);
+        boolean setbackApplied = applySetback(player, safePosition, safePositionAtMillis);
         double appliedDamage = applyFallDamage(player, fallDistance);
         plugin.getAlertManager().send("NoFall", player, vl);
         if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
@@ -191,13 +216,11 @@ public final class NoFallCheck implements Listener {
      * Return the player to the last known safe, grounded position. Internal
      * teleports are excluded from lifecycle cleanup so the NoFall VL persists.
      */
-    private boolean applySetback(Player player) {
+    private boolean applySetback(Player player, Location safe, long savedAt) {
         if (!setbackEnabled || !plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true)) {
             return false;
         }
         UUID id = player.getUniqueId();
-        Location safe = lastSafePositions.get(id);
-        long savedAt = lastSafePositionAt.getOrDefault(id, 0L);
         if (safe == null || safe.getWorld() == null || safe.getWorld() != player.getWorld()
                 || System.currentTimeMillis() - savedAt > safePositionMaxAgeMillis) {
             return false;
@@ -254,11 +277,6 @@ public final class NoFallCheck implements Listener {
         return false;
     }
 
-    private boolean hasImmediateSolidSupport(Location location) {
-        Material belowFeet = location.clone().subtract(0.0, 0.08, 0.0).getBlock().getType();
-        return belowFeet.isSolid() && !isFallDamageExemptMaterial(belowFeet);
-    }
-
     private boolean isFallDamageExemptMaterial(Material material) {
         String name = material.name();
         return material == Material.WATER || material == Material.LAVA
@@ -275,6 +293,14 @@ public final class NoFallCheck implements Listener {
                 || name.contains("VINE")
                 || name.equals("LADDER")
                 || name.contains("DRIPLEAF");
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onFallDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player player
+                && event.getCause() == EntityDamageEvent.DamageCause.FALL) {
+            lastFallDamageAt.put(player.getUniqueId(), System.currentTimeMillis());
+        }
     }
 
     @EventHandler
@@ -312,6 +338,7 @@ public final class NoFallCheck implements Listener {
         violations.remove(id);
         lastSafePositions.remove(id);
         lastSafePositionAt.remove(id);
+        lastFallDamageAt.remove(id);
         applyingSetbacks.remove(id);
     }
 
@@ -321,7 +348,12 @@ public final class NoFallCheck implements Listener {
         violations.clear();
         lastSafePositions.clear();
         lastSafePositionAt.clear();
+        lastFallDamageAt.clear();
         applyingSetbacks.clear();
+    }
+
+    private static Location copyLocation(Location location) {
+        return location == null ? null : location.clone();
     }
 
     private record NoFallProfile(
@@ -330,23 +362,34 @@ public final class NoFallCheck implements Listener {
             boolean safeSurface,
             int ping,
             double fallDistance,
-            org.bukkit.World world) { }
+            org.bukkit.World world,
+            Location lastSafePosition,
+            long lastSafePositionAt) { }
 
     private static final class PacketState {
         private long firstClaimNanos;
         private long lastAlertNanos;
         private double candidateFallDistance;
+        private long suspectedAtMillis;
+        private Location candidateSafePosition;
+        private long candidateSafePositionAt;
         private int claims;
 
         private void reset() {
             firstClaimNanos = 0L;
             candidateFallDistance = 0.0;
+            suspectedAtMillis = 0L;
+            candidateSafePosition = null;
+            candidateSafePositionAt = 0L;
             claims = 0;
         }
 
         private void resetCandidateOnly() {
             firstClaimNanos = 0L;
             candidateFallDistance = 0.0;
+            suspectedAtMillis = 0L;
+            candidateSafePosition = null;
+            candidateSafePositionAt = 0L;
             claims = 0;
         }
     }
