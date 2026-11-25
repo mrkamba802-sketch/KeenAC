@@ -224,8 +224,7 @@ public final class NoSlowCheck implements Listener {
         if (now - lastAirborneNanos.getOrDefault(id, 0L) < 600_000_000L) return true;
 
         if (player.isDead() || !player.isValid() || player.isInsideVehicle()
-                || player.isGliding() || player.isSwimming() || player.isFlying()
-                || player.isInWater() || player.isClimbing()
+                || player.isGliding() || player.isFlying() || player.isClimbing()
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
                 || player.hasPotionEffect(PotionEffectType.LEVITATION)) return true;
         if (!plugin.getConfig().getBoolean("checks.no-slow.block-friction", true)) return false;
