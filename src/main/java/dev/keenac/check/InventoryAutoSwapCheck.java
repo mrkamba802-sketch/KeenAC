@@ -2,7 +2,6 @@ package dev.keenac.check;
 
 import dev.keenac.KeenAC;
 import org.bukkit.GameMode;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -11,7 +10,6 @@ import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.InventoryType;
-import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -61,11 +59,6 @@ public final class InventoryAutoSwapCheck implements Listener {
         InventoryAction action = event.getAction();
         if (action != InventoryAction.SWAP_WITH_CURSOR
                 && action != InventoryAction.HOTBAR_SWAP) {
-            return;
-        }
-
-        ItemStack current = event.getCurrentItem();
-        if (current == null || current.getType() == Material.AIR) {
             return;
         }
 
