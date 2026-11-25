@@ -24,6 +24,7 @@ public final class AirStuckCheck {
 
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
+    private final Map<UUID, PacketPosition> packetPositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> pearlGraceUntilTick = new HashMap<>();
     private long serverTick;
 
@@ -32,23 +33,11 @@ public final class AirStuckCheck {
     }
 
     /**
-     * Called by the PacketEvents listener on the Bukkit main thread with coordinates
-     * decoded from an incoming client movement packet.
+     * PacketEvents callback. Stores only primitive packet coordinates because this
+     * method runs on the network thread; Bukkit world/location access stays on tick().
      */
-    public void recordPacketPosition(Player player, Location packetLocation) {
-        if (packetLocation == null || packetLocation.getWorld() == null) {
-            return;
-        }
-        PlayerState state = states.computeIfAbsent(
-                player.getUniqueId(), ignored -> new PlayerState(player.getLocation()));
-        if (!state.worldId.equals(packetLocation.getWorld().getUID())) {
-            state.worldId = packetLocation.getWorld().getUID();
-            state.anchor = packetLocation.clone();
-            state.packetPosition = packetLocation.clone();
-            clearSuspicion(player, state);
-            return;
-        }
-        state.packetPosition = packetLocation.clone();
+    public void recordPacketPosition(UUID playerId, double x, double y, double z) {
+        packetPositions.put(playerId, new PacketPosition(x, y, z));
     }
 
     public void tick() {
@@ -84,6 +73,21 @@ public final class AirStuckCheck {
     private void inspect(Player player) {
         PlayerState state = states.computeIfAbsent(
                 player.getUniqueId(), ignored -> new PlayerState(player.getLocation()));
+
+        UUID currentWorldId = player.getWorld().getUID();
+        if (!state.worldId.equals(currentWorldId)) {
+            state.worldId = currentWorldId;
+            state.anchor = player.getLocation().clone();
+            state.packetPosition = null;
+            packetPositions.remove(player.getUniqueId());
+            clearSuspicion(player, state);
+            return;
+        }
+
+        PacketPosition packet = packetPositions.get(player.getUniqueId());
+        if (packet != null) {
+            state.packetPosition = new Location(player.getWorld(), packet.x, packet.y, packet.z);
+        }
 
         if (hasPearlGrace(player)) {
             // A pearl throw may leave the player temporarily stationary in mid-air,
@@ -386,6 +390,7 @@ public final class AirStuckCheck {
     public void reset(Player player) {
         // Keep an active pearl grace through the pearl's teleport event. The
         // grace expires on its own timer, even if the impact did not teleport.
+        packetPositions.remove(player.getUniqueId());
         PlayerState state = states.remove(player.getUniqueId());
         if (state != null) {
             clearSuspicion(player, state);
@@ -394,6 +399,7 @@ public final class AirStuckCheck {
 
     public void forget(UUID playerId) {
         pearlGraceUntilTick.remove(playerId);
+        packetPositions.remove(playerId);
         PlayerState state = states.remove(playerId);
         if (state != null) {
             clearSuspicion(Bukkit.getPlayer(playerId), state);
@@ -405,8 +411,11 @@ public final class AirStuckCheck {
             clearSuspicion(Bukkit.getPlayer(entry.getKey()), entry.getValue());
         }
         states.clear();
+        packetPositions.clear();
         pearlGraceUntilTick.clear();
     }
+
+    private record PacketPosition(double x, double y, double z) { }
 
     private static final class PlayerState {
         private UUID worldId;
