@@ -59,7 +59,7 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Integer> elytraPing = new ConcurrentHashMap<>();
     private volatile boolean elytraPacketEnabled = true;
     private volatile int elytraPacketMaxPing = 250;
-    private volatile double elytraPacketMaxBps = 35.1;
+    private volatile double elytraPacketMaxBps = 85.0;
     private volatile int elytraPacketConfirmSamples = 2;
     private volatile long elytraPacketCooldownNanos = 1_500_000_000L;
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
@@ -141,7 +141,7 @@ public final class MotionCheck implements Listener {
         elytraPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
         elytraPacketMaxBps = Math.max(1.0,
-                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 35.1));
+                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 85.0));
         elytraPacketConfirmSamples = Math.max(1,
                 plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
         elytraPacketCooldownNanos = Math.max(250L,
@@ -190,23 +190,56 @@ public final class MotionCheck implements Listener {
         double measuredBps = 0.0;
         boolean violation = false;
         synchronized (state) {
-            if (!state.hasPosition) {
-                state.setPosition(x, y, z, nowNanos);
+            if (state.positions.isEmpty()) {
+                state.positions.addLast(new ElytraPositionSample(x, y, z, nowNanos));
+                state.lastPacketNanos = nowNanos;
                 return;
             }
 
-            double elapsedSeconds = (nowNanos - state.lastPacketNanos) / 1_000_000_000.0;
-            double dx = x - state.x;
-            double dy = y - state.y;
-            double dz = z - state.z;
-            state.setPosition(x, y, z, nowNanos);
-
-            if (elapsedSeconds < 0.005 || elapsedSeconds > 0.75) {
+            long packetGapNanos = nowNanos - state.lastPacketNanos;
+            if (packetGapNanos <= 0L) {
+                return;
+            }
+            if (packetGapNanos > 750_000_000L) {
+                // A packet stall is not evidence of speed. Start a new clean window.
+                state.positions.clear();
+                state.positions.addLast(new ElytraPositionSample(x, y, z, nowNanos));
+                state.lastPacketNanos = nowNanos;
                 state.fastSamples = 0;
                 return;
             }
 
-            measuredBps = Math.sqrt(dx * dx + dy * dy + dz * dz) / elapsedSeconds;
+            state.positions.addLast(new ElytraPositionSample(x, y, z, nowNanos));
+            state.lastPacketNanos = nowNanos;
+
+            // Keep the sample immediately before the 400 ms cutoff, then compare
+            // it with the newest position. This averages out packet jitter/bursts
+            // instead of treating one delayed packet interval as the player's speed.
+            long cutoffNanos = nowNanos - 400_000_000L;
+            while (state.positions.size() > 2) {
+                java.util.Iterator<ElytraPositionSample> iterator = state.positions.iterator();
+                iterator.next();
+                ElytraPositionSample second = iterator.next();
+                if (second.timestampNanos <= cutoffNanos) {
+                    state.positions.removeFirst();
+                } else {
+                    break;
+                }
+            }
+
+            ElytraPositionSample first = state.positions.peekFirst();
+            ElytraPositionSample last = state.positions.peekLast();
+            long windowNanos = last.timestampNanos - first.timestampNanos;
+            if (windowNanos < 300_000_000L) {
+                return;
+            }
+
+            double dx = last.x - first.x;
+            double dy = last.y - first.y;
+            double dz = last.z - first.z;
+            measuredBps = Math.sqrt(dx * dx + dy * dy + dz * dz)
+                    / (windowNanos / 1_000_000_000.0);
+
             if (measuredBps > threshold) {
                 state.fastSamples++;
             } else {
@@ -232,22 +265,13 @@ public final class MotionCheck implements Listener {
         }
     }
 
+    private record ElytraPositionSample(double x, double y, double z, long timestampNanos) { }
+
     private static final class ElytraPacketState {
-        private double x;
-        private double y;
-        private double z;
+        private final Deque<ElytraPositionSample> positions = new ArrayDeque<>();
         private long lastPacketNanos;
         private long lastAlertNanos;
         private int fastSamples;
-        private boolean hasPosition;
-
-        private void setPosition(double x, double y, double z, long timestampNanos) {
-            this.x = x;
-            this.y = y;
-            this.z = z;
-            this.lastPacketNanos = timestampNanos;
-            this.hasPosition = true;
-        }
     }
 
     private void recordElytraSpeedViolation(Player player, double bps, double threshold) {
