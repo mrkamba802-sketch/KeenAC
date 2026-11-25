@@ -42,9 +42,8 @@ checks:
 
   auto-swap:
     enabled: true
-    # Alert-only heuristic. Counts repeated inventory slot-swap operations,
-    # not ordinary clicks, shift-click transfers or drag events.
-    # Weighted burst threshold across cursor swaps, hotbar swaps and quick transfers.
+    # Alert-only heuristic using raw inventory packets and large drag operations.
+    # It weighs slot swaps more heavily than quick transfers and cursor clicks.
     # Alerts are informational only; manual sorting can still need staff review.
     required-swaps: 12
     window-ms: 1000
