@@ -47,6 +47,7 @@ public final class ActionBlockListener implements Listener {
                 || event.getAction() == Action.RIGHT_CLICK_BLOCK;
         if (rightClick && event.getItem() != null
                 && event.getItem().getType() == Material.ENDER_PEARL) {
+            check.grantPearlGrace(event.getPlayer());
             return;
         }
         cancelIfFlagged(event.getPlayer(), event);
