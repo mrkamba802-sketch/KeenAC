@@ -189,7 +189,7 @@ public final class BaritoneCheck implements Listener {
             if (distance > 0.85) {
                 // Packet bursts, knockback-like jumps, and discontinuities are
                 // discarded instead of being interpreted as navigation patterns.
-                state.reset(profile.worldId(), x, z, yaw, now);
+                state.reset(x, z, yaw, rotationChanged, now);
                 return;
             }
 
