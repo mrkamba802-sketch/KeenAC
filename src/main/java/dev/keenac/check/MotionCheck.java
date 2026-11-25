@@ -331,6 +331,14 @@ public final class MotionCheck implements Listener {
         UUID id = player.getUniqueId();
         Location current = player.getLocation();
 
+        // Elytra flight changes the movement model completely. Ignore all Motion
+        // evidence while airborne with an Elytra equipped, and clear stale samples.
+        if (isElytraMotionExempt(player)) {
+            clearMotionEvidence(id);
+            resetMovementSample(id, current, nowNanos);
+            return;
+        }
+
         if (!isEligibleForMotionSample(player, current)) {
             resetMovementSample(id, current, nowNanos);
             return;
@@ -395,12 +403,6 @@ public final class MotionCheck implements Listener {
     }
 
     private boolean isEligibleForMotionSample(Player player, Location location) {
-        long glideGrace = Math.max(0L,
-                plugin.getConfig().getLong("checks.motion.glide-grace-ms", 3000L));
-        long glideChangedAt = lastGlideChangeAt.getOrDefault(player.getUniqueId(), 0L);
-        if (glideChangedAt > 0L && System.currentTimeMillis() - glideChangedAt <= glideGrace) {
-            return false;
-        }
         if (!player.isOnline() || !player.isValid()
                 || player.isInsideVehicle() || player.isFlying() || player.isGliding()
                 || player.isSwimming() || player.isRiptiding()
@@ -417,6 +419,27 @@ public final class MotionCheck implements Listener {
 
         return !isSpecialMovementSurface(location)
                 && !isSpecialMovementSurface(location.clone().subtract(0.0, 0.2, 0.0));
+    }
+
+    private boolean isElytraMotionExempt(Player player) {
+        if (player.isGliding()) {
+            return true;
+        }
+
+        // Bukkit can report the glide toggle one tick later than the movement
+        // update. Treat airborne players wearing an Elytra as flight movement,
+        // even during that transition window.
+        var chestplate = player.getInventory().getChestplate();
+        if (chestplate != null && chestplate.getType() == Material.ELYTRA
+                && !player.isOnGround()) {
+            return true;
+        }
+
+        long glideGrace = Math.max(0L,
+                plugin.getConfig().getLong("checks.motion.glide-grace-ms", 3000L));
+        long glideChangedAt = lastGlideChangeAt.getOrDefault(player.getUniqueId(), 0L);
+        return glideChangedAt > 0L
+                && System.currentTimeMillis() - glideChangedAt <= glideGrace;
     }
 
     private boolean isSpecialMovementSurface(Location location) {
@@ -497,6 +520,14 @@ public final class MotionCheck implements Listener {
         hoveringTicks.remove(id);
     }
 
+    private void clearMotionEvidence(UUID id) {
+        suspicionTimes.remove(id);
+        reviewUntil.remove(id);
+        excessiveSpeedTicks.remove(id);
+        hoveringTicks.remove(id);
+        lastSignalTick.remove(id);
+    }
+
     private void clearMovementSamples() {
         samplePositions.clear();
         sampleTimesNanos.clear();
@@ -517,12 +548,16 @@ public final class MotionCheck implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> recordSuspicion(player, reason));
             return;
         }
-        if (!player.isOnline() || player.isGliding()
+        if (!player.isOnline()
                 || !plugin.getConfig().getBoolean("checks.motion.enabled", true)) {
             return;
         }
 
         UUID id = player.getUniqueId();
+        if (isElytraMotionExempt(player)) {
+            clearMotionEvidence(id);
+            return;
+        }
         long previousSignalTick = lastSignalTick.getOrDefault(id, Long.MIN_VALUE);
         if (previousSignalTick == serverTick) {
             return;
@@ -691,11 +726,7 @@ public final class MotionCheck implements Listener {
         }
         UUID id = player.getUniqueId();
         lastGlideChangeAt.put(id, System.currentTimeMillis());
-        suspicionTimes.remove(id);
-        reviewUntil.remove(id);
-        excessiveSpeedTicks.remove(id);
-        hoveringTicks.remove(id);
-        lastSignalTick.remove(id);
+        clearMotionEvidence(id);
         samplePositions.remove(id);
         sampleTimesNanos.remove(id);
     }
@@ -758,7 +789,8 @@ public final class MotionCheck implements Listener {
             }
 
             // Do not fight expected server-side movement modes.
-            if (online.isInsideVehicle() || online.isFlying() || online.isGliding()
+            if (isElytraMotionExempt(online)
+                    || online.isInsideVehicle() || online.isFlying() || online.isGliding()
                     || online.isSwimming() || online.isRiptiding()
                     || online.getGameMode() == org.bukkit.GameMode.CREATIVE
                     || online.getGameMode() == org.bukkit.GameMode.SPECTATOR) {
