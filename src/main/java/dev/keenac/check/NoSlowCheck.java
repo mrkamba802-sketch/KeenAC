@@ -108,7 +108,7 @@ public final class NoSlowCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         Material pendingType = pendingConsumeCancellation.get(id);
         if (pendingType != null && event.getItem().getType() == pendingType
-                && plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) {
+                && shouldCancelConsume(pendingType)) {
             event.setCancelled(true);
             event.getPlayer().clearActiveItem();
         }
@@ -147,6 +147,11 @@ public final class NoSlowCheck implements Listener {
                 continue;
             }
             Material tracked = entry.getValue();
+            if (!shouldCancelConsume(tracked)) {
+                lastCancellationAlertNanos.remove(id);
+                iterator.remove();
+                continue;
+            }
             boolean stillHolding = player.getInventory().getItemInMainHand().getType() == tracked
                     || player.getInventory().getItemInOffHand().getType() == tracked;
             if (!stillHolding) {
@@ -186,6 +191,12 @@ public final class NoSlowCheck implements Listener {
                 lastViolationNanos.put(id, now);
             }
         }
+    }
+
+    private boolean shouldCancelConsume(Material material) {
+        if (!plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true)) return false;
+        return !material.isEdible()
+                || plugin.getConfig().getBoolean("checks.no-slow.reset-food", true);
     }
 
     private Material getTrackedItemType(Player player) {
