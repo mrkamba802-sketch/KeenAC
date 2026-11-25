@@ -106,8 +106,8 @@ checks:
   elytra-speed:
     enabled: true
     # Maximum allowed averaged 3D flight speed, measured over a 400 ms packet window.
-    # Values below the vanilla high-speed dive range are deliberately avoided.
-    max-bps: 85.0
+    # Maximum allowed averaged 3D flight speed (blocks per second).
+    max-bps: 45.1
     # Consecutive over-limit smoothed windows required to confirm a violation.
     confirm-samples: 2
     max-ping-ms: 250
@@ -119,6 +119,27 @@ checks:
       safe-position-max-age-ms: 30000
       # Stop elytra flight and hard-freeze movement after the rollback.
       freeze-duration-ms: 2500
+
+  baritone:
+    enabled: true
+    # Only review stable, on-ground navigation with a low, steady ping.
+    max-ping-ms: 220
+    # Repeated route-shape analysis window and required matching turn sequence.
+    observation-window-ms: 45000
+    pattern-segments: 4
+    required-repeats: 3
+    # A repeat must keep both turn angle and distance between turns consistent.
+    angle-tolerance-degrees: 10.0
+    segment-distance-tolerance: 0.40
+    minimum-turn-degrees: 25.0
+    maximum-turn-degrees: 155.0
+    minimum-segment-distance: 1.0
+    maximum-segment-distance: 12.0
+    yaw-turn-tolerance-degrees: 28.0
+    alert-cooldown-ms: 15000
+    # Advisory only: Baritone is not directly identifiable from movement packets.
+    # This check alerts on repeated automated-looking ground-navigation patterns.
+    log-context: true
 
   aura:
     enabled: true
