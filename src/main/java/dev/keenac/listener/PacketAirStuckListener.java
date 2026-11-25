@@ -6,20 +6,18 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
-import dev.keenac.KeenAC;
 import dev.keenac.check.AirStuckCheck;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
+import dev.keenac.check.MotionCheck;
 import org.bukkit.entity.Player;
 
 public final class PacketAirStuckListener extends PacketListenerAbstract {
-    private final KeenAC plugin;
-    private final AirStuckCheck check;
+    private final AirStuckCheck airStuckCheck;
+    private final MotionCheck motionCheck;
 
-    public PacketAirStuckListener(KeenAC plugin, AirStuckCheck check) {
+    public PacketAirStuckListener(AirStuckCheck airStuckCheck, MotionCheck motionCheck) {
         super(PacketListenerPriority.NORMAL);
-        this.plugin = plugin;
-        this.check = check;
+        this.airStuckCheck = airStuckCheck;
+        this.motionCheck = motionCheck;
     }
 
     @Override
@@ -43,24 +41,21 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             double x = packetLocation.getX();
             double y = packetLocation.getY();
             double z = packetLocation.getZ();
+            var playerId = player.getUniqueId();
 
-            // Bukkit world/player state is accessed only on the main thread.
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isOnline() && player.isValid()) {
-                    check.recordPacketPosition(
-                            player, new Location(player.getWorld(), x, y, z));
-                }
-            });
+            // These methods store immutable values only; no Bukkit API is touched
+            // from PacketEvents' network thread.
+            airStuckCheck.recordPacketPosition(playerId, x, y, z);
+            motionCheck.recordElytraPacketPosition(playerId, x, y, z);
             return;
         }
 
-        // Prevent melee damage at the packet boundary while AirStuck is confirmed.
         if (event.getPacketType() == PacketType.Play.Client.INTERACT_ENTITY) {
             WrapperPlayClientInteractEntity interact =
                     new WrapperPlayClientInteractEntity(event);
             if (interact.getAction()
                     == WrapperPlayClientInteractEntity.InteractAction.ATTACK
-                    && check.isFlagged(player.getUniqueId())) {
+                    && airStuckCheck.isFlagged(player.getUniqueId())) {
                 event.setCancelled(true);
             }
         }
