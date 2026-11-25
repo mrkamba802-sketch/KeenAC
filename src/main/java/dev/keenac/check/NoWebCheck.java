@@ -84,22 +84,28 @@ public final class NoWebCheck implements Listener {
             }
 
             double moved = from.distance(to);
-            if (moved > 0.005 && moved <= maxDistance) {
-                state.locked = false;
-                state.violationLevel = Math.max(0, state.violationLevel - 1);
-                state.lastSafe = to.clone();
-                state.anchor = to.clone();
-                return;
-            }
-
-            // Rotation-only packets do not release the lock, but keep the camera responsive.
-            if (moved <= 0.005) {
+            if (moved > maxDistance) {
+                // Keep correcting excessive movement and continue increasing VL
+                // once per server tick. Reaching x2 must not freeze alerts at x2.
+                state.normalMovementSamples = 0;
                 returnToAnchor(event, state);
+                countViolation(player, state);
                 return;
             }
 
-            returnToAnchor(event, state);
-            countViolation(player, state);
+            // A single legal-sized movement packet is not enough to release a
+            // player from the anchor. Let normal movement through, and release
+            // the lock after several consecutive legal samples. Never decrement
+            // VL here: alert levels must remain monotonic during one violation.
+            state.lastSafe = to.clone();
+            state.anchor = to.clone();
+            if (moved > 0.005) {
+                state.normalMovementSamples++;
+                if (state.normalMovementSamples >= 3) {
+                    state.locked = false;
+                    state.normalMovementSamples = 0;
+                }
+            }
             return;
         }
 
@@ -259,6 +265,7 @@ public final class NoWebCheck implements Listener {
         private long lastViolationTick = Long.MIN_VALUE;
         private long lastViolationNanos;
         private long lastMovementNanos;
+        private int normalMovementSamples;
         private boolean locked;
 
         private PlayerState(Location initialLocation) {
