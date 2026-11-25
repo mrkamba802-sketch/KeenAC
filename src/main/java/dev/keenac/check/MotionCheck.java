@@ -17,6 +17,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.event.vehicle.VehicleEnterEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.util.Vector;
 
@@ -215,6 +216,25 @@ public final class MotionCheck implements Listener {
         locked.setYaw(to.getYaw());
         locked.setPitch(to.getPitch());
         event.setTo(locked);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void preventTeleportWhileFrozen(PlayerTeleportEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        if (applyingSetbacks.contains(id)) {
+            return;
+        }
+        if (isFrozen(id, System.currentTimeMillis())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void preventVehicleEntryWhileFrozen(VehicleEnterEvent event) {
+        if (event.getEntered() instanceof Player player
+                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
+            event.setCancelled(true);
+        }
     }
 
     private boolean isFrozen(UUID id, long now) {
