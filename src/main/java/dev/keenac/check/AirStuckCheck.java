@@ -162,8 +162,8 @@ public final class AirStuckCheck {
 
         state.stationaryTicks++;
 
-        int requiredTicks = Math.max(30,
-                plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 40));
+        int requiredTicks = Math.max(16,
+                plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 24));
 
         if (state.stationaryTicks >= requiredTicks) {
             state.confirmationSamples++;
@@ -366,7 +366,8 @@ public final class AirStuckCheck {
     }
 
     private void clearSuspicion(Player player, PlayerState state) {
-        // AirStuck is alert-only. It must never change player rotation or input.
+        // A confirmed AirStuck flag is consumed by ActionBlockListener, which
+        // can reject block breaking and placement until the suspicion clears.
         clearSuspicion(state);
     }
 
@@ -386,6 +387,11 @@ public final class AirStuckCheck {
 
     public boolean isFlagged(Player player) {
         return player != null && isFlagged(player.getUniqueId());
+    }
+
+    /** AirStuck action mitigation is limited to block breaking and placement. */
+    public boolean shouldCancelBlockActions() {
+        return plugin.getConfig().getBoolean("checks.air-stuck.cancel-actions", true);
     }
 
     public void reset(Player player) {
