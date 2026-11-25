@@ -8,16 +8,20 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientIn
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.MotionCheck;
+import dev.keenac.check.NoFallCheck;
 import org.bukkit.entity.Player;
 
 public final class PacketAirStuckListener extends PacketListenerAbstract {
     private final AirStuckCheck airStuckCheck;
     private final MotionCheck motionCheck;
+    private final NoFallCheck noFallCheck;
 
-    public PacketAirStuckListener(AirStuckCheck airStuckCheck, MotionCheck motionCheck) {
+    public PacketAirStuckListener(AirStuckCheck airStuckCheck, MotionCheck motionCheck,
+                                  NoFallCheck noFallCheck) {
         super(PacketListenerPriority.NORMAL);
         this.airStuckCheck = airStuckCheck;
         this.motionCheck = motionCheck;
+        this.noFallCheck = noFallCheck;
     }
 
     @Override
@@ -28,6 +32,9 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
 
         if (WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())) {
             WrapperPlayClientPlayerFlying movement = new WrapperPlayClientPlayerFlying(event);
+            var playerId = player.getUniqueId();
+            noFallCheck.recordPacketOnGround(playerId, movement.isOnGround());
+
             if (!movement.hasPositionChanged()) {
                 return;
             }
@@ -41,12 +48,11 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             double x = packetLocation.getX();
             double y = packetLocation.getY();
             double z = packetLocation.getZ();
-            var playerId = player.getUniqueId();
-
             // These methods store immutable values only; no Bukkit API is touched
             // from PacketEvents' network thread.
             airStuckCheck.recordPacketPosition(playerId, x, y, z);
             motionCheck.recordElytraPacketPosition(playerId, x, y, z);
+            motionCheck.recordPacketMovement(playerId, x, y, z, movement.isOnGround());
             return;
         }
 
