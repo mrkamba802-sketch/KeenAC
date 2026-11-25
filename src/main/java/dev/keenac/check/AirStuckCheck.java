@@ -21,6 +21,7 @@ public final class AirStuckCheck {
 
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
+    private final Map<UUID, Long> pearlGraceUntilTick = new HashMap<>();
     private long serverTick;
 
     public AirStuckCheck(KeenAC plugin) {
@@ -66,6 +67,9 @@ public final class AirStuckCheck {
             inspect(player);
         }
 
+        pearlGraceUntilTick.keySet().removeIf(id -> Bukkit.getPlayer(id) == null
+                || serverTick > pearlGraceUntilTick.getOrDefault(id, 0L));
+
         Iterator<UUID> iterator = states.keySet().iterator();
         while (iterator.hasNext()) {
             if (Bukkit.getPlayer(iterator.next()) == null) {
@@ -77,6 +81,19 @@ public final class AirStuckCheck {
     private void inspect(Player player) {
         PlayerState state = states.computeIfAbsent(
                 player.getUniqueId(), ignored -> new PlayerState(player.getLocation()));
+
+        if (hasPearlGrace(player)) {
+            // A pearl throw may leave the player temporarily stationary in mid-air,
+            // especially when the pearl hits a nearby block or tree. Keep the normal
+            // AirStuck check paused briefly, refreshing its movement baseline each tick.
+            state.worldId = player.getWorld().getUID();
+            Location baseline = state.packetPosition;
+            state.anchor = baseline != null && baseline.getWorld() != null
+                    && baseline.getWorld().getUID().equals(state.worldId)
+                    ? baseline.clone() : player.getLocation().clone();
+            clearSuspicion(player, state);
+            return;
+        }
 
         if (isExemptMovementState(player)) {
             state.worldId = player.getWorld().getUID();
@@ -126,6 +143,42 @@ public final class AirStuckCheck {
         if (state.flagged) {
             applyShake(player, state);
         }
+    }
+
+
+    /**
+     * Grants a short AirStuck grace period after a legitimate Ender Pearl launch.
+     * The grace is intentionally time-limited and does not change accumulated VL.
+     */
+    public void grantPearlGrace(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+
+        long graceTicks = Math.max(1L,
+                plugin.getConfig().getLong("checks.air-stuck.pearl-grace-ticks", 80L));
+        UUID id = player.getUniqueId();
+        pearlGraceUntilTick.put(id, Math.max(
+                pearlGraceUntilTick.getOrDefault(id, 0L),
+                serverTick + graceTicks));
+
+        PlayerState state = states.computeIfAbsent(id,
+                ignored -> new PlayerState(player.getLocation()));
+        state.worldId = player.getWorld().getUID();
+        state.anchor = player.getLocation().clone();
+        clearSuspicion(player, state);
+    }
+
+    private boolean hasPearlGrace(Player player) {
+        Long untilTick = pearlGraceUntilTick.get(player.getUniqueId());
+        if (untilTick == null) {
+            return false;
+        }
+        if (serverTick > untilTick) {
+            pearlGraceUntilTick.remove(player.getUniqueId());
+            return false;
+        }
+        return true;
     }
 
     private boolean isExemptMovementState(Player player) {
@@ -303,6 +356,7 @@ public final class AirStuckCheck {
     }
 
     public void reset(Player player) {
+        pearlGraceUntilTick.remove(player.getUniqueId());
         PlayerState state = states.remove(player.getUniqueId());
         if (state != null) {
             clearSuspicion(player, state);
@@ -310,6 +364,7 @@ public final class AirStuckCheck {
     }
 
     public void forget(UUID playerId) {
+        pearlGraceUntilTick.remove(playerId);
         PlayerState state = states.remove(playerId);
         if (state != null) {
             clearSuspicion(Bukkit.getPlayer(playerId), state);
@@ -321,6 +376,7 @@ public final class AirStuckCheck {
             clearSuspicion(Bukkit.getPlayer(entry.getKey()), entry.getValue());
         }
         states.clear();
+        pearlGraceUntilTick.clear();
     }
 
     private static final class PlayerState {
