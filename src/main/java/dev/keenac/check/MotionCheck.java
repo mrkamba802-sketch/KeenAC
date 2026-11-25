@@ -48,6 +48,14 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Location> lastJumpOrigin = new HashMap<>();
     private final Map<UUID, Long> lastJumpAt = new HashMap<>();
     private final Map<UUID, Long> frozenUntil = new HashMap<>();
+    private final Map<UUID, Location> frozenPosition = new HashMap<>();
+    private final Map<UUID, Location> lastSafePosition = new HashMap<>();
+    private final Map<UUID, Long> lastSafeAt = new HashMap<>();
+    private final Map<UUID, Location> elytraSamplePositions = new HashMap<>();
+    private final Map<UUID, Long> elytraSampleTimesNanos = new HashMap<>();
+    private final Map<UUID, Integer> elytraFastSamples = new HashMap<>();
+    private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
+    private final Map<UUID, Long> lastElytraAlertAt = new HashMap<>();
     private final Map<UUID, Location> samplePositions = new HashMap<>();
     private final Map<UUID, Long> sampleTimesNanos = new HashMap<>();
     private final Map<UUID, Integer> excessiveSpeedTicks = new HashMap<>();
@@ -55,6 +63,7 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Integer> violationLevels = new HashMap<>();
     private final Map<UUID, Long> lastSignalTick = new HashMap<>();
     private final Set<UUID> pendingSetbacks = new HashSet<>();
+    private final Set<UUID> pendingElytraSetbacks = new HashSet<>();
     private final Set<UUID> applyingSetbacks = new HashSet<>();
     private long serverTick;
 
@@ -76,6 +85,13 @@ public final class MotionCheck implements Listener {
 
         long nowNanos = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
+            UUID id = player.getUniqueId();
+            if (isFrozen(id, System.currentTimeMillis())) {
+                player.setVelocity(new Vector(0.0, 0.0, 0.0));
+            } else {
+                recordSafeGroundPosition(player);
+            }
+            inspectElytraSpeed(player, nowNanos);
             inspectMovement(player, nowNanos);
         }
 
@@ -86,6 +102,169 @@ public final class MotionCheck implements Listener {
         sampleTimesNanos.keySet().removeIf(id -> !online.contains(id));
         excessiveSpeedTicks.keySet().removeIf(id -> !online.contains(id));
         hoveringTicks.keySet().removeIf(id -> !online.contains(id));
+        elytraSamplePositions.keySet().removeIf(id -> !online.contains(id));
+        elytraSampleTimesNanos.keySet().removeIf(id -> !online.contains(id));
+        elytraFastSamples.keySet().removeIf(id -> !online.contains(id));
+        lastSafePosition.keySet().removeIf(id -> !online.contains(id));
+        lastSafeAt.keySet().removeIf(id -> !online.contains(id));
+    }
+
+    private void recordSafeGroundPosition(Player player) {
+        if (!player.isOnGround() || player.isInsideVehicle() || player.isDead()
+                || player.getGameMode() == GameMode.CREATIVE
+                || player.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
+        UUID id = player.getUniqueId();
+        lastSafePosition.put(id, player.getLocation().clone());
+        lastSafeAt.put(id, System.currentTimeMillis());
+    }
+
+    /**
+     * Measure actual 3D displacement per second while the player is gliding.
+     * Require consecutive over-limit samples to avoid flagging a single packet
+     * burst, then alert with its own monotonically increasing ElytraSpeed VL.
+     */
+    private void inspectElytraSpeed(Player player, long nowNanos) {
+        UUID id = player.getUniqueId();
+        if (!plugin.getConfig().getBoolean("checks.elytra-speed.enabled", true)
+                || !player.isGliding() || !player.isOnline() || !player.isValid()
+                || player.isInsideVehicle()
+                || player.getGameMode() == GameMode.CREATIVE
+                || player.getGameMode() == GameMode.SPECTATOR) {
+            elytraSamplePositions.remove(id);
+            elytraSampleTimesNanos.remove(id);
+            elytraFastSamples.remove(id);
+            return;
+        }
+
+        int maxPing = Math.max(50,
+                plugin.getConfig().getInt("checks.elytra-speed.max-ping-ms", 250));
+        if (player.getPing() > maxPing) {
+            resetElytraSample(id, player.getLocation(), nowNanos);
+            return;
+        }
+
+        Location current = player.getLocation();
+        Location previous = elytraSamplePositions.put(id, current.clone());
+        Long previousTime = elytraSampleTimesNanos.put(id, nowNanos);
+        if (previous == null || previousTime == null
+                || previous.getWorld() != current.getWorld()) {
+            elytraFastSamples.remove(id);
+            return;
+        }
+
+        double elapsedSeconds = (nowNanos - previousTime) / 1_000_000_000.0;
+        if (elapsedSeconds < 0.015 || elapsedSeconds > 0.75) {
+            elytraFastSamples.remove(id);
+            return;
+        }
+
+        double blocksPerSecond = previous.distance(current) / elapsedSeconds;
+        double threshold = Math.max(1.0,
+                plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 34.1));
+        if (blocksPerSecond > threshold) {
+            int samples = elytraFastSamples.getOrDefault(id, 0) + 1;
+            elytraFastSamples.put(id, samples);
+            int required = Math.max(1,
+                    plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
+            if (samples >= required) {
+                recordElytraSpeedViolation(player, blocksPerSecond, threshold);
+                elytraFastSamples.put(id, 0);
+            }
+        } else {
+            elytraFastSamples.remove(id);
+        }
+    }
+
+    private void resetElytraSample(UUID id, Location location, long nowNanos) {
+        elytraSamplePositions.put(id, location.clone());
+        elytraSampleTimesNanos.put(id, nowNanos);
+        elytraFastSamples.remove(id);
+    }
+
+    private void recordElytraSpeedViolation(Player player, double bps, double threshold) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        long cooldown = Math.max(250L,
+                plugin.getConfig().getLong("checks.elytra-speed.alert-cooldown-ms", 1500L));
+        long lastAlert = lastElytraAlertAt.getOrDefault(id, 0L);
+        if (now - lastAlert < cooldown) {
+            return;
+        }
+        lastElytraAlertAt.put(id, now);
+
+        int vl = elytraViolationLevels.merge(id, 1, (current, one) ->
+                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + one);
+        plugin.getAlertManager().send("ElytraSpeed", player, vl);
+        if (plugin.getConfig().getBoolean("checks.elytra-speed.log-context", true)) {
+            plugin.getLogger().warning(String.format(java.util.Locale.ROOT,
+                    "ElytraSpeed review for %s (VL=%d, speed=%.2f BPS, limit=%.2f BPS)",
+                    player.getName(), vl, bps, threshold));
+        }
+
+        if (plugin.getConfig().getBoolean("checks.elytra-speed.setback.enabled", true)) {
+            applyElytraSpeedSetback(player);
+        }
+    }
+
+    private void applyElytraSpeedSetback(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        if (!Bukkit.isPrimaryThread()) {
+            UUID id = player.getUniqueId();
+            if (pendingElytraSetbacks.add(id)) {
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    pendingElytraSetbacks.remove(id);
+                    Player online = Bukkit.getPlayer(id);
+                    if (online != null && online.isOnline()) {
+                        applyElytraSpeedSetback(online);
+                    }
+                });
+            }
+            return;
+        }
+
+        UUID id = player.getUniqueId();
+        player.setGliding(false);
+
+        Location correction = lastSafePosition.get(id);
+        long safeAt = lastSafeAt.getOrDefault(id, 0L);
+        long maxAge = Math.max(1000L,
+                plugin.getConfig().getLong("checks.elytra-speed.setback.safe-position-max-age-ms", 30000L));
+        if (correction == null || correction.getWorld() != player.getWorld()
+                || System.currentTimeMillis() - safeAt > maxAge) {
+            correction = player.getLocation().clone();
+        } else {
+            correction = correction.clone();
+            Location current = player.getLocation();
+            correction.setYaw(current.getYaw());
+            correction.setPitch(current.getPitch());
+        }
+
+        boolean applied = true;
+        if (correction.getWorld() == player.getWorld()
+                && correction.distanceSquared(player.getLocation()) > 0.0001) {
+            applyingSetbacks.add(id);
+            try {
+                applied = player.teleport(correction, PlayerTeleportEvent.TeleportCause.PLUGIN);
+            } finally {
+                applyingSetbacks.remove(id);
+            }
+        }
+
+        if (applied) {
+            long freezeDuration = Math.max(500L,
+                    plugin.getConfig().getLong("checks.elytra-speed.setback.freeze-duration-ms", 2500L));
+            frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
+            frozenPosition.put(id, player.getLocation().clone());
+            player.setGliding(false);
+            player.setVelocity(new Vector(0.0, 0.0, 0.0));
+            elytraSamplePositions.remove(id);
+            elytraSampleTimesNanos.remove(id);
+            elytraFastSamples.remove(id);
+        }
     }
 
     private void inspectMovement(Player player, long nowNanos) {
@@ -433,7 +612,10 @@ public final class MotionCheck implements Listener {
             return;
         }
 
-        Location locked = from.clone();
+        Location locked = frozenPosition.getOrDefault(id, from).clone();
+        if (locked.getWorld() != to.getWorld()) {
+            locked = from.clone();
+        }
         locked.setYaw(to.getYaw());
         locked.setPitch(to.getPitch());
         event.setTo(locked);
@@ -465,6 +647,7 @@ public final class MotionCheck implements Listener {
         }
         if (now >= until) {
             frozenUntil.remove(id, until);
+            frozenPosition.remove(id);
             return false;
         }
         return true;
@@ -508,7 +691,14 @@ public final class MotionCheck implements Listener {
             if (correction == null || now - jumpAt > jumpMaxAge
                     || correction.getWorld() == null
                     || correction.getWorld() != online.getWorld()) {
-                return;
+                correction = lastSafePosition.get(id);
+                long safeAt = lastSafeAt.getOrDefault(id, 0L);
+                long safeMaxAge = Math.max(1000L,
+                        plugin.getConfig().getLong("checks.motion.setback.safe-position-max-age-ms", 15000L));
+                if (correction == null || correction.getWorld() != online.getWorld()
+                        || now - safeAt > safeMaxAge) {
+                    return;
+                }
             }
 
             correction = correction.clone();
@@ -528,6 +718,7 @@ public final class MotionCheck implements Listener {
                 long freezeDuration = Math.max(1L,
                         plugin.getConfig().getLong("checks.motion.setback.freeze-duration-ms", 1500L));
                 frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
+                frozenPosition.put(id, online.getLocation().clone());
                 online.setVelocity(new Vector(0.0, 0.0, 0.0));
                 lastJumpOrigin.remove(id);
                 lastJumpAt.remove(id);
@@ -584,7 +775,16 @@ public final class MotionCheck implements Listener {
         lastJumpOrigin.remove(id);
         lastJumpAt.remove(id);
         frozenUntil.remove(id);
+        frozenPosition.remove(id);
+        lastSafePosition.remove(id);
+        lastSafeAt.remove(id);
+        elytraSamplePositions.remove(id);
+        elytraSampleTimesNanos.remove(id);
+        elytraFastSamples.remove(id);
+        elytraViolationLevels.remove(id);
+        lastElytraAlertAt.remove(id);
         pendingSetbacks.remove(id);
+        pendingElytraSetbacks.remove(id);
         applyingSetbacks.remove(id);
         samplePositions.remove(id);
         sampleTimesNanos.remove(id);
@@ -601,7 +801,16 @@ public final class MotionCheck implements Listener {
         lastJumpOrigin.clear();
         lastJumpAt.clear();
         frozenUntil.clear();
+        frozenPosition.clear();
+        lastSafePosition.clear();
+        lastSafeAt.clear();
+        elytraSamplePositions.clear();
+        elytraSampleTimesNanos.clear();
+        elytraFastSamples.clear();
+        elytraViolationLevels.clear();
+        lastElytraAlertAt.clear();
         pendingSetbacks.clear();
+        pendingElytraSetbacks.clear();
         applyingSetbacks.clear();
         violationLevels.clear();
         lastSignalTick.clear();
