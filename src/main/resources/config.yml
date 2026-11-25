@@ -51,13 +51,25 @@ checks:
 
   motion:
     enabled: true
-    # Five externally supplied suspicion signals inside this rolling window trigger review.
+    # Five independently sampled anomalies inside this rolling window trigger an alert.
     required-suspicions: 5
     suspicion-window-ms: 3000
-    # Further signals refresh the review cooldown and prevent repeated setbacks during it.
+    # Prevent repeated alerts while the current review is active.
     review-window-ms: 3000
-    # Recent velocity events are included as legitimate movement context and suppress setback.
+    # Ignore movement shortly after server-side velocity changes (knockback, explosions, etc.).
     velocity-grace-ms: 1200
+    max-ping-ms: 250
+    speed:
+      # Sustained horizontal speed must exceed vanilla-derived speed by this multiplier
+      # plus the fixed buffer before it is counted as suspicious.
+      multiplier: 1.45
+      buffer: 0.75
+      confirm-ticks: 3
+    hover:
+      # Require a sustained near-stationary vertical position while airborne.
+      vertical-tolerance: 0.015
+      velocity-tolerance: 0.035
+      confirm-ticks: 12
     # Return to the exact location where the latest jump started after x5.
     # Then reject all positional movement for the configured duration.
     setback:
