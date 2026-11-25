@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.InventoryAutoSwapCheck;
+import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
@@ -12,6 +13,7 @@ import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
 import dev.keenac.listener.PacketAutoSwapListener;
+import dev.keenac.listener.PacketInvHitListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -21,9 +23,11 @@ public final class KeenAC extends JavaPlugin {
 
     private AirStuckCheck airStuckCheck;
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
+    private InvHitCheck invHitCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract autoSwapPacketListener;
+    private PacketListenerAbstract invHitPacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -42,13 +46,17 @@ public final class KeenAC extends JavaPlugin {
         }
         airStuckCheck = new AirStuckCheck(this);
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
+        invHitCheck = new InvHitCheck(this);
         packetListener = new PacketAirStuckListener(this, airStuckCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(this, inventoryAutoSwapCheck);
+        invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
 
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
+        Bukkit.getPluginManager().registerEvents(invHitCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
@@ -76,9 +84,13 @@ public final class KeenAC extends JavaPlugin {
             if (autoSwapPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(autoSwapPacketListener);
             }
+            if (invHitPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(invHitPacketListener);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
+        if (invHitCheck != null) invHitCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
 }
