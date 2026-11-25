@@ -128,7 +128,7 @@ public final class NoFallCheck implements Listener {
         }
 
         boolean candidateFall = !profile.serverOnGround
-                && profile.fallDistance >= minimumFallDistance;
+                && profile.fallDistance > minimumFallDistance;
         boolean shouldConfirm = false;
         double candidateDistance = 0.0;
         long suspectedAtNanos = 0L;
