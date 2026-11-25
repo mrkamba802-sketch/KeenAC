@@ -16,13 +16,14 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class AirStuckCheck {
 
     private static final double SUPPORT_EPSILON = 0.06;
 
     private final KeenAC plugin;
-    private final Map<UUID, PlayerState> states = new HashMap<>();
+    private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
     private final Map<UUID, Long> pearlGraceUntilTick = new HashMap<>();
     private long serverTick;
 
@@ -160,7 +161,12 @@ public final class AirStuckCheck {
                 plugin.getConfig().getInt("checks.air-stuck.stationary-ticks", 40));
 
         if (state.stationaryTicks >= requiredTicks) {
-            flag(player, state);
+            state.confirmationSamples++;
+            int requiredConfirmSamples = Math.max(1,
+                    plugin.getConfig().getInt("checks.air-stuck.confirm-samples", 5));
+            if (state.confirmationSamples >= requiredConfirmSamples) {
+                flag(player, state);
+            }
         }
 
     }
@@ -362,13 +368,19 @@ public final class AirStuckCheck {
     private void clearSuspicion(PlayerState state) {
         state.flagged = false;
         state.stationaryTicks = 0;
+        state.confirmationSamples = 0;
         state.alertedDuringCurrentFlag = false;
         state.nextAlertTick = 0L;
     }
 
+    /** Read-only packet-thread-safe flag lookup. */
+    public boolean isFlagged(UUID playerId) {
+        PlayerState state = states.get(playerId);
+        return state != null && state.flagged;
+    }
+
     public boolean isFlagged(Player player) {
-        // Kept for compatibility with the action listener; AirStuck never blocks players.
-        return false;
+        return player != null && isFlagged(player.getUniqueId());
     }
 
     public void reset(Player player) {
@@ -401,8 +413,9 @@ public final class AirStuckCheck {
         private Location anchor;
         private Location packetPosition;
         private int stationaryTicks;
+        private int confirmationSamples;
         private int violationLevel;
-        private boolean flagged;
+        private volatile boolean flagged;
         private boolean hasAlerted;
         private boolean alertedDuringCurrentFlag;
         private long lastAlertTick;

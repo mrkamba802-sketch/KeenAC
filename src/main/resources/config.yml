@@ -7,6 +7,8 @@ checks:
     # Consecutive server ticks with no position change while server-side
     # vertical velocity confirms the player should be falling.
     stationary-ticks: 40
+    # Extra consecutive confirmed samples required before AirStuck flags.
+    confirm-samples: 5
     movement-tolerance: 0.02
     velocity-tolerance: 0.18
     max-ping-ms: 250
@@ -41,12 +43,21 @@ checks:
 
   auto-swap:
     enabled: true
-    # Count only accepted number-key HOTBAR_SWAP clicks to a non-selected slot.
-    # PICKUP, QUICK_MOVE, drag and ordinary cursor operations are ignored.
-    # Alerts are informational only; repeated manual sorting can still be legitimate.
-    required-swaps: 12
-    window-ms: 1000
+    # PacketEvents CLICK_WINDOW / SWAP events, including swaps in open containers.
+    # Hotbar keys (0-8) and offhand key (40) are counted. Alerts are advisory.
+    required-swaps: 8
+    window-ms: 1500
     alert-cooldown-ms: 5000
+
+  aura:
+    enabled: true
+    # Conservative horizontal facing threshold; repeated hits are required.
+    max-angle-degrees: 110.0
+    required-hits: 3
+    window-ms: 1500
+    flag-duration-ms: 900
+    alert-cooldown-ms: 5000
+    max-distance: 5.0
 
   inv-hit:
     enabled: true

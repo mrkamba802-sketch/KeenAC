@@ -1,99 +1,103 @@
 package dev.keenac.check;
 
 import dev.keenac.KeenAC;
-import org.bukkit.GameMode;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.ClickType;
-import org.bukkit.event.inventory.InventoryAction;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Alert-only monitor for repeated, server-accepted hotbar swap operations.
- * It ignores PICKUP, QUICK_MOVE, drag and cursor operations. Swaps into the
- * currently selected hand are ignored; alerts remain advisory, not proof.
+ * PacketEvents-driven monitor for inventory SWAP click packets.
+ * The Bukkit listener is used only to discard per-player state on quit.
  */
 public final class InventoryAutoSwapCheck implements Listener {
-    private static final long DEFAULT_WINDOW_MILLIS = 1_000L;
-    private static final int DEFAULT_REQUIRED_SWAPS = 12;
-    private static final long DEFAULT_ALERT_COOLDOWN_MILLIS = 5_000L;
-
     private final KeenAC plugin;
-    private final Map<UUID, Deque<Long>> recentSwaps = new HashMap<>();
-    private final Map<UUID, Long> lastAlertNanos = new HashMap<>();
-    private final Map<UUID, Integer> violationLevels = new HashMap<>();
+    private final Map<UUID, SwapState> states = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> selectedSlots = new ConcurrentHashMap<>();
+
+    private volatile boolean enabled;
+    private volatile int requiredSwaps;
+    private volatile long windowNanos;
+    private volatile long alertCooldownNanos;
 
     public InventoryAutoSwapCheck(KeenAC plugin) {
         this.plugin = plugin;
+        reloadSettings();
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player player)
-                || player.getGameMode() == GameMode.CREATIVE
-                || player.isDead()
-                || !plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
-            return;
-        }
-
-        // A number-key click with HOTBAR_SWAP is the explicit slot exchange.
-        // Other inventory actions are deliberately not part of this check.
-        if (event.getClick() != ClickType.NUMBER_KEY
-                || event.getAction() != InventoryAction.HOTBAR_SWAP
-                || event.getClickedInventory() == null) {
-            return;
-        }
-
-        int hotbarSlot = event.getHotbarButton();
-        if (hotbarSlot < 0 || hotbarSlot > 8
-                || hotbarSlot == player.getInventory().getHeldItemSlot()) {
-            return;
-        }
-
-        recordSwap(player);
+    /** Called on the server thread after startup or /keenac reload. */
+    public void reloadSettings() {
+        enabled = plugin.getConfig().getBoolean("checks.auto-swap.enabled", true);
+        requiredSwaps = Math.max(4,
+                plugin.getConfig().getInt("checks.auto-swap.required-swaps", 8));
+        windowNanos = Math.max(250L,
+                plugin.getConfig().getLong("checks.auto-swap.window-ms", 1500L))
+                * 1_000_000L;
+        alertCooldownNanos = Math.max(1000L,
+                plugin.getConfig().getLong("checks.auto-swap.alert-cooldown-ms", 5000L))
+                * 1_000_000L;
     }
 
-    private void recordSwap(Player player) {
-        UUID id = player.getUniqueId();
+    /** PacketEvents HELD_ITEM_CHANGE updates the last client-selected hotbar slot. */
+    public void recordSelectedSlot(UUID playerId, int slot) {
+        if (playerId != null && slot >= 0 && slot <= 8) {
+            selectedSlots.put(playerId, slot);
+        }
+    }
+
+    public int getSelectedSlot(UUID playerId) {
+        return selectedSlots.getOrDefault(playerId, -1);
+    }
+
+    /**
+     * Called only for PacketEvents CLICK_WINDOW packets whose click type is SWAP.
+     * Button 0-8 means a hotbar key; button 40 is the offhand swap key.
+     */
+    public void recordSwap(UUID playerId, int windowId, int clickedSlot, int button) {
+        if (!enabled || playerId == null || windowId < 0 || clickedSlot < 0
+                || !((button >= 0 && button <= 8) || button == 40)) {
+            return;
+        }
+
+        int selected = getSelectedSlot(playerId);
+        if (button <= 8 && selected == button) {
+            return;
+        }
+
         long now = System.nanoTime();
-        long windowNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.auto-swap.window-ms",
-                        DEFAULT_WINDOW_MILLIS)) * 1_000_000L;
+        SwapState state = states.computeIfAbsent(playerId, ignored -> new SwapState());
+        int violationLevel = 0;
+        synchronized (state) {
+            while (!state.samples.isEmpty()
+                    && now - state.samples.peekFirst() > windowNanos) {
+                state.samples.removeFirst();
+            }
+            state.samples.addLast(now);
 
-        Deque<Long> samples = recentSwaps.computeIfAbsent(id, ignored -> new ArrayDeque<>());
-        samples.addLast(now);
-        while (!samples.isEmpty() && now - samples.peekFirst() > windowNanos) {
-            samples.removeFirst();
+            if (state.samples.size() < requiredSwaps
+                    || now - state.lastAlertNanos < alertCooldownNanos) {
+                return;
+            }
+
+            state.samples.clear();
+            state.lastAlertNanos = now;
+            violationLevel = ++state.violationLevel;
         }
 
-        int requiredSwaps = Math.max(8,
-                plugin.getConfig().getInt("checks.auto-swap.required-swaps",
-                        DEFAULT_REQUIRED_SWAPS));
-        if (samples.size() < requiredSwaps) {
-            return;
-        }
-
-        long cooldownNanos = Math.max(1_000L,
-                plugin.getConfig().getLong("checks.auto-swap.alert-cooldown-ms",
-                        DEFAULT_ALERT_COOLDOWN_MILLIS)) * 1_000_000L;
-        long lastAlert = lastAlertNanos.getOrDefault(id, 0L);
-        if (now - lastAlert < cooldownNanos) {
-            return;
-        }
-
-        int violationLevel = violationLevels.merge(id, 1, Integer::sum);
-        lastAlertNanos.put(id, now);
-        samples.clear();
-        plugin.getAlertManager().send("AutoSwap", player, violationLevel);
+        final int vl = violationLevel;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline() && enabled) {
+                plugin.getAlertManager().send("AutoSwap", player, vl);
+            }
+        });
     }
 
     @EventHandler
@@ -102,14 +106,18 @@ public final class InventoryAutoSwapCheck implements Listener {
     }
 
     public void clear(UUID playerId) {
-        recentSwaps.remove(playerId);
-        lastAlertNanos.remove(playerId);
-        violationLevels.remove(playerId);
+        states.remove(playerId);
+        selectedSlots.remove(playerId);
     }
 
     public void clearAll() {
-        recentSwaps.clear();
-        lastAlertNanos.clear();
-        violationLevels.clear();
+        states.clear();
+        selectedSlots.clear();
+    }
+
+    private static final class SwapState {
+        private final Deque<Long> samples = new ArrayDeque<>();
+        private long lastAlertNanos;
+        private int violationLevel;
     }
 }
