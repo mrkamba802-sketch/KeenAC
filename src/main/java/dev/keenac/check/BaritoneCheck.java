@@ -167,19 +167,19 @@ public final class BaritoneCheck implements Listener {
 
         long now = System.nanoTime();
         PacketState state = states.computeIfAbsent(id,
-                ignored -> new PacketState(profile.worldId(), x, z, yaw, now));
+                ignored -> new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now));
         boolean shouldAlert = false;
         int violationLevel = 0;
         int observedTurns = 0;
 
         synchronized (state) {
             if (!state.worldId.equals(profile.worldId())) {
-                states.put(id, new PacketState(profile.worldId(), x, z, yaw, now));
+                states.put(id, new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now));
                 return;
             }
             if (now - state.lastPacketNanos > 350_000_000L
                     || now <= state.lastPacketNanos) {
-                state.reset(profile.worldId(), x, z, yaw, now);
+                state.reset(x, z, yaw, rotationChanged, now);
                 return;
             }
 
@@ -231,10 +231,12 @@ public final class BaritoneCheck implements Listener {
                     state.turns.addLast(new TurnSample(turn, segmentLength, now));
                     pruneOldTurns(state, now);
                     if (hasRepeatedPattern(state)
-                            && now - state.lastAlertNanos >= alertCooldownNanos) {
+                            && (state.lastAlertNanos == 0L
+                            || now - state.lastAlertNanos >= alertCooldownNanos)) {
                         state.lastAlertNanos = now;
-                        state.violationLevel = Math.min(Integer.MAX_VALUE,
-                                state.violationLevel + 1);
+                        if (state.violationLevel < Integer.MAX_VALUE) {
+                            state.violationLevel++;
+                        }
                         violationLevel = state.violationLevel;
                         observedTurns = state.turns.size();
                         shouldAlert = true;
@@ -399,14 +401,14 @@ public final class BaritoneCheck implements Listener {
         private boolean hasYaw;
         private boolean hasDirection;
 
-        private PacketState(UUID worldId, double x, double z, float yaw, long now) {
+        private PacketState(UUID worldId, double x, double z, float yaw,
+                            boolean rotationChanged, long now) {
             this.worldId = worldId;
-            reset(worldId, x, z, yaw, now);
+            reset(x, z, yaw, rotationChanged, now);
         }
 
-        private void reset(UUID world, double x, double z, float yaw, long now) {
-            // worldId is immutable for a PacketState, so a world change is
-            // handled by replacing the state in recordMovement.
+        private void reset(double x, double z, float yaw,
+                           boolean rotationChanged, long now) {
             lastX = x;
             lastZ = z;
             lastYaw = yaw;
@@ -415,7 +417,7 @@ public final class BaritoneCheck implements Listener {
             segmentDistance = 0.0;
             lastPacketNanos = now;
             turns.clear();
-            hasYaw = true;
+            hasYaw = rotationChanged;
             hasDirection = false;
         }
     }
