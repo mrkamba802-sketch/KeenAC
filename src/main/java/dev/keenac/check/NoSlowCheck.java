@@ -28,7 +28,6 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, Integer> violations = new HashMap<>();
     private final Map<UUID, Long> lastViolationNanos = new HashMap<>();
     private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
-    private final Map<UUID, Long> lastCancellationAlertNanos = new HashMap<>();
     private final Map<UUID, Long> lastAirborneNanos = new HashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
@@ -54,12 +53,13 @@ public final class NoSlowCheck implements Listener {
         if (event.getTo() == null) return;
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
-        UseData data = usingItems.get(id);
-        if (data == null) return;
         if (!player.isHandRaised()) {
             usingItems.remove(id);
+            pendingConsumeCancellation.remove(id);
             return;
         }
+        UseData data = usingItems.get(id);
+        if (data == null) return;
 
         long elapsedNanos = System.nanoTime() - data.lastSampleNanos;
         if (elapsedNanos < 35_000_000L) return;
@@ -72,6 +72,7 @@ public final class NoSlowCheck implements Listener {
             data.lastLocation = event.getTo().clone();
             data.lastSampleNanos = System.nanoTime();
             data.samples = 0;
+            data.normalSamples = 0;
             return;
         }
 
@@ -88,7 +89,22 @@ public final class NoSlowCheck implements Listener {
 
         data.lastLocation = event.getTo().clone();
         data.lastSampleNanos = System.nanoTime();
-        data.samples = suspicious ? data.samples + 1 : Math.max(0, data.samples - 1);
+        if (suspicious) {
+            data.samples++;
+            data.normalSamples = 0;
+        } else {
+            data.samples = Math.max(0, data.samples - 1);
+            data.normalSamples++;
+            // Several consecutive vanilla-speed samples mean the exploit has stopped.
+            // Clear stale VL and any pending interruption instead of carrying suspicion forward.
+            if (data.normalSamples >= 3) {
+                violations.remove(id);
+                lastViolationNanos.remove(id);
+                pendingConsumeCancellation.remove(id);
+                data.samples = 0;
+                data.normalSamples = 0;
+            }
+        }
 
         int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 6));
         if (data.samples >= required) {
@@ -112,6 +128,7 @@ public final class NoSlowCheck implements Listener {
             event.setCancelled(true);
             event.getPlayer().clearActiveItem();
         }
+        pendingConsumeCancellation.remove(id);
         usingItems.remove(id);
     }
 
@@ -120,7 +137,6 @@ public final class NoSlowCheck implements Listener {
         violations.remove(id);
         lastViolationNanos.remove(id);
         pendingConsumeCancellation.remove(id);
-        lastCancellationAlertNanos.remove(id);
         lastAirborneNanos.remove(id);
     }
 
@@ -129,7 +145,6 @@ public final class NoSlowCheck implements Listener {
         violations.clear();
         lastViolationNanos.clear();
         pendingConsumeCancellation.clear();
-        lastCancellationAlertNanos.clear();
         lastAirborneNanos.clear();
     }
 
@@ -142,33 +157,25 @@ public final class NoSlowCheck implements Listener {
             Player player = Bukkit.getPlayer(entry.getKey());
             UUID id = entry.getKey();
             if (player == null || !player.isOnline()) {
-                lastCancellationAlertNanos.remove(id);
                 iterator.remove();
                 continue;
             }
             Material tracked = entry.getValue();
             if (!shouldCancelConsume(tracked)) {
-                lastCancellationAlertNanos.remove(id);
                 iterator.remove();
                 continue;
             }
             boolean stillHolding = player.getInventory().getItemInMainHand().getType() == tracked
                     || player.getInventory().getItemInOffHand().getType() == tracked;
             if (!stillHolding) {
-                lastCancellationAlertNanos.remove(id);
                 iterator.remove();
                 continue;
             }
             if (player.isHandRaised()) {
+                // Interrupt once per confirmed violation. Repeating this every few
+                // seconds traps legitimate users even after their movement is normal.
                 player.clearActiveItem();
-                long now = System.nanoTime();
-                long lastAlert = lastCancellationAlertNanos.getOrDefault(id, 0L);
-                if (now - lastAlert >= 2_000_000_000L) {
-                    int vl = violations.merge(id, 1, Integer::sum);
-                    lastViolationNanos.put(id, now);
-                    plugin.getAlertManager().send("NoSlow", player, vl);
-                    lastCancellationAlertNanos.put(id, now);
-                }
+                iterator.remove();
             }
         }
     }
@@ -241,7 +248,7 @@ public final class NoSlowCheck implements Listener {
         private org.bukkit.Location lastLocation;
         private long lastSampleNanos;
         private int samples;
-        private boolean flagged;
+        private int normalSamples;
 
         private UseData(org.bukkit.Location location, long now, int samples) {
             this.lastLocation = location;
