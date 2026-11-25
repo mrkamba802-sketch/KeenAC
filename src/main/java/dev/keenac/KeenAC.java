@@ -11,12 +11,14 @@ import dev.keenac.check.MotionCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
+import dev.keenac.check.ReachCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
 import dev.keenac.listener.PacketAutoSwapListener;
 import dev.keenac.listener.PacketAuraListener;
 import dev.keenac.listener.PacketInvHitListener;
+import dev.keenac.listener.PacketReachListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -28,12 +30,14 @@ public final class KeenAC extends JavaPlugin {
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private InvHitCheck invHitCheck;
     private AuraCheck auraCheck;
+    private ReachCheck reachCheck;
     private MotionCheck motionCheck;
     private AlertManager alertManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract invHitPacketListener;
     private PacketListenerAbstract autoSwapPacketListener;
     private PacketListenerAbstract auraPacketListener;
+    private PacketListenerAbstract reachPacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -54,20 +58,24 @@ public final class KeenAC extends JavaPlugin {
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         invHitCheck = new InvHitCheck(this);
         auraCheck = new AuraCheck(this);
+        reachCheck = new ReachCheck(this);
         motionCheck = new MotionCheck(this);
         packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
         auraPacketListener = new PacketAuraListener(auraCheck);
+        reachPacketListener = new PacketReachListener(reachCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(auraPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(reachPacketListener);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(invHitCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(auraCheck, this);
+        Bukkit.getPluginManager().registerEvents(reachCheck, this);
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
         Bukkit.getPluginManager().registerEvents(new NoSlowCheck(this), this);
@@ -80,6 +88,7 @@ public final class KeenAC extends JavaPlugin {
         tickTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
             airStuckCheck.tick();
             auraCheck.tick();
+            reachCheck.tick();
             motionCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
@@ -96,6 +105,7 @@ public final class KeenAC extends JavaPlugin {
     public void reloadChecks() {
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.reloadSettings();
         if (auraCheck != null) auraCheck.reloadSettings();
+        if (reachCheck != null) reachCheck.reloadSettings();
     }
 
     @Override
@@ -114,11 +124,15 @@ public final class KeenAC extends JavaPlugin {
             if (auraPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(auraPacketListener);
             }
+            if (reachPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(reachPacketListener);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
         if (invHitCheck != null) invHitCheck.clearAll();
         if (auraCheck != null) auraCheck.clearAll();
+        if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
     }
