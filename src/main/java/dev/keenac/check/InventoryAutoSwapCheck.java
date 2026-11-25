@@ -14,7 +14,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
