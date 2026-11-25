@@ -14,10 +14,13 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
 public final class NoWebCheck implements Listener {
+    private static final long VIOLATION_DECAY_NANOS = 5_000_000_000L;
+
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private long serverTick;
@@ -26,6 +29,9 @@ public final class NoWebCheck implements Listener {
         this.plugin = plugin;
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             serverTick++;
+            if (serverTick % 20L == 0L) {
+                decayStates();
+            }
             states.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
         }, 1L, 1L);
     }
@@ -53,17 +59,40 @@ public final class NoWebCheck implements Listener {
             return;
         }
 
+        double maxDistance = Math.max(0.01,
+                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.08));
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
 
-        // Once VL reaches x2, keep the player anchored. Even tiny movement
-        // attempts are redirected to the last position accepted by this check.
+        // Once VL reaches x2, only unusually large movement remains blocked.
+        // Normal-sized movement immediately releases the anchor so a player who
+        // turns the speed exploit off is not trapped by stale violation state.
         if (state != null && state.locked) {
+            if (!toInWeb) {
+                states.remove(id);
+                return;
+            }
             if (state.anchor == null || state.anchor.getWorld() != from.getWorld()) {
                 states.remove(id);
                 return;
             }
+
+            double moved = from.distance(to);
+            if (moved > 0.005 && moved <= maxDistance) {
+                state.locked = false;
+                state.violationLevel = Math.max(0, state.violationLevel - 1);
+                state.lastSafe = to.clone();
+                state.anchor = to.clone();
+                return;
+            }
+
+            // Rotation-only packets do not release the lock, but keep the camera responsive.
+            if (moved <= 0.005) {
+                returnToAnchor(event, state);
+                return;
+            }
+
             returnToAnchor(event, state);
             countViolation(player, state);
             return;
@@ -72,7 +101,7 @@ public final class NoWebCheck implements Listener {
         // Entering or leaving a cobweb is not itself a violation.
         if (!fromInWeb || !toInWeb) {
             if (!fromInWeb && !toInWeb) {
-                states.remove(id);
+                if (state == null || state.violationLevel == 0) states.remove(id);
             } else if (toInWeb) {
                 if (state == null) state = new PlayerState(to);
                 state.lastSafe = to.clone();
@@ -88,10 +117,7 @@ public final class NoWebCheck implements Listener {
             states.put(id, state);
         }
 
-        double maxDistance = Math.max(0.01,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.08));
         double moved = from.distance(to);
-
         if (moved > maxDistance) {
             countViolation(player, state);
             if (state.violationLevel >= 2) {
@@ -103,6 +129,34 @@ public final class NoWebCheck implements Listener {
         }
 
         state.lastSafe = to.clone();
+    }
+
+    private void decayStates() {
+        long now = System.nanoTime();
+        Iterator<Map.Entry<UUID, PlayerState>> iterator = states.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, PlayerState> entry = iterator.next();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) {
+                iterator.remove();
+                continue;
+            }
+
+            PlayerState state = entry.getValue();
+            if (state.violationLevel > 0
+                    && now - state.lastViolationNanos >= VIOLATION_DECAY_NANOS) {
+                state.violationLevel--;
+                state.lastViolationNanos = now;
+                if (state.violationLevel < 2) {
+                    state.locked = false;
+                }
+            }
+
+            if (state.violationLevel == 0 && !state.locked
+                    && !intersectsCobweb(player, player.getLocation())) {
+                iterator.remove();
+            }
+        }
     }
 
     private void returnToAnchor(PlayerMoveEvent event, PlayerState state) {
@@ -122,6 +176,7 @@ public final class NoWebCheck implements Listener {
         if (state.lastViolationTick == serverTick) return;
         state.violationLevel++;
         state.lastViolationTick = serverTick;
+        state.lastViolationNanos = System.nanoTime();
         plugin.getAlertManager().send("NoWeb", player, state.violationLevel);
     }
 
@@ -166,6 +221,7 @@ public final class NoWebCheck implements Listener {
         private Location anchor;
         private int violationLevel;
         private long lastViolationTick = Long.MIN_VALUE;
+        private long lastViolationNanos;
         private boolean locked;
 
         private PlayerState(Location initialLocation) {
