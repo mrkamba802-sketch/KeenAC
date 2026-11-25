@@ -8,28 +8,30 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Conservative, alert-only inventory swap monitor.
+ * Alert-only monitor for unusually dense inventory rearrangement activity.
  *
- * It deliberately ignores generic clicks, shift-click transfers and drag events.
- * A burst of swap operations is only a signal for staff review, never proof by itself.
+ * It observes server-accepted inventory operations across the complete open
+ * inventory view, rather than only clicks on the player's lower inventory.
+ * A signal is advisory and must never be treated as proof on its own.
  */
 public final class InventoryAutoSwapCheck implements Listener {
-    private static final long DEFAULT_WINDOW_MILLIS = 900L;
-    private static final int DEFAULT_REQUIRED_SWAPS = 15;
+    private static final long DEFAULT_WINDOW_MILLIS = 1_000L;
+    private static final int DEFAULT_REQUIRED_SCORE = 12;
     private static final long DEFAULT_ALERT_COOLDOWN_MILLIS = 5_000L;
 
     private final KeenAC plugin;
-    private final Map<UUID, Deque<Long>> recentSwaps = new HashMap<>();
+    private final Map<UUID, Deque<OperationSample>> recentOperations = new HashMap<>();
     private final Map<UUID, Long> lastAlertNanos = new HashMap<>();
     private final Map<UUID, Integer> violationLevels = new HashMap<>();
 
@@ -39,43 +41,69 @@ public final class InventoryAutoSwapCheck implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
-        if (!plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
-            return;
-        }
         if (!(event.getWhoClicked() instanceof Player player)
                 || player.getGameMode() == GameMode.CREATIVE
-                || player.isDead()) {
+                || player.isDead()
+                || event.getClickedInventory() == null
+                || !plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
             return;
         }
 
-        // Only observe changes to the player's own inventory. Container sorting,
-        // shift-click transfers, drag actions and ordinary clicks are not counted.
-        if (event.getClickedInventory() == null
-                || event.getClickedInventory().getType() != InventoryType.PLAYER) {
-            return;
-        }
-
+        // Do not filter by clicked inventory: slot swaps against a chest/container
+        // can be sent through the top inventory, not just PlayerInventory.
         InventoryAction action = event.getAction();
-        if (action != InventoryAction.SWAP_WITH_CURSOR
-                && action != InventoryAction.HOTBAR_SWAP) {
+        int score = switch (action) {
+            case HOTBAR_SWAP, HOTBAR_MOVE_AND_READD, SWAP_WITH_CURSOR -> 2;
+            case MOVE_TO_OTHER_INVENTORY, COLLECT_TO_CURSOR -> 1;
+            default -> 0;
+        };
+        if (score == 0) {
             return;
         }
 
+        recordOperation(player, score);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)
+                || player.getGameMode() == GameMode.CREATIVE
+                || player.isDead()
+                || !plugin.getConfig().getBoolean("checks.auto-swap.enabled", true)) {
+            return;
+        }
+
+        // A multi-slot drag is one operation, not one score per changed slot.
+        // Only larger rearrangements contribute, reducing ordinary drag noise.
+        if (event.getRawSlots().size() >= 4) {
+            recordOperation(player, 1);
+        }
+    }
+
+    private void recordOperation(Player player, int score) {
         UUID id = player.getUniqueId();
         long now = System.nanoTime();
-        long windowNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.auto-swap.window-ms", DEFAULT_WINDOW_MILLIS))
-                * 1_000_000L;
 
-        Deque<Long> samples = recentSwaps.computeIfAbsent(id, ignored -> new ArrayDeque<>());
-        samples.addLast(now);
-        while (!samples.isEmpty() && now - samples.peekFirst() > windowNanos) {
+        long windowNanos = Math.max(250L,
+                plugin.getConfig().getLong("checks.auto-swap.window-ms",
+                        DEFAULT_WINDOW_MILLIS)) * 1_000_000L;
+        Deque<OperationSample> samples = recentOperations.computeIfAbsent(
+                id, ignored -> new ArrayDeque<>());
+        samples.addLast(new OperationSample(now, score));
+
+        while (!samples.isEmpty() && now - samples.peekFirst().timeNanos > windowNanos) {
             samples.removeFirst();
         }
 
-        int requiredSwaps = Math.max(8,
-                plugin.getConfig().getInt("checks.auto-swap.required-swaps", DEFAULT_REQUIRED_SWAPS));
-        if (samples.size() < requiredSwaps) {
+        int totalScore = 0;
+        for (OperationSample sample : samples) {
+            totalScore += sample.score;
+        }
+
+        int requiredScore = Math.max(8,
+                plugin.getConfig().getInt("checks.auto-swap.required-swaps",
+                        DEFAULT_REQUIRED_SCORE));
+        if (totalScore < requiredScore) {
             return;
         }
 
@@ -91,8 +119,8 @@ public final class InventoryAutoSwapCheck implements Listener {
         lastAlertNanos.put(id, now);
         samples.clear();
 
-        // Inventory automation cannot be proven from Bukkit click events alone.
-        // Keep this check informational and let staff review the alert.
+        // Inventory automation cannot be proven from server inventory events alone.
+        // Keep this informational and let staff review the alert.
         plugin.getAlertManager().send("AutoSwap", player, violationLevel);
     }
 
@@ -102,14 +130,24 @@ public final class InventoryAutoSwapCheck implements Listener {
     }
 
     public void clear(UUID playerId) {
-        recentSwaps.remove(playerId);
+        recentOperations.remove(playerId);
         lastAlertNanos.remove(playerId);
         violationLevels.remove(playerId);
     }
 
     public void clearAll() {
-        recentSwaps.clear();
+        recentOperations.clear();
         lastAlertNanos.clear();
         violationLevels.clear();
+    }
+
+    private static final class OperationSample {
+        private final long timeNanos;
+        private final int score;
+
+        private OperationSample(long timeNanos, int score) {
+            this.timeNanos = timeNanos;
+            this.score = score;
+        }
     }
 }
