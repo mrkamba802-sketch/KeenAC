@@ -112,6 +112,21 @@ checks:
     alert-cooldown-ms: 5000
     max-distance: 5.0
 
+  reach:
+    enabled: true
+    # Base survival reach. Ping adds a small bounded tolerance; it never disables this check.
+    base-distance: 3.10
+    # The target hitbox is rewound by attacker ping, up to this maximum.
+    max-rewind-ms: 500
+    # Additional reach allowance grows with ping but is capped at max-ping-buffer.
+    ping-buffer-per-ms: 0.002
+    max-ping-buffer: 0.85
+    # Repeated suspicious attack packets are required before alerting/cancelling.
+    required-hits: 3
+    window-ms: 2500
+    alert-cooldown-ms: 3000
+    cancel-hits: true
+
   inv-hit:
     enabled: true
     # Cancel attack packets and alert when a player attacks while a server GUI is open.
