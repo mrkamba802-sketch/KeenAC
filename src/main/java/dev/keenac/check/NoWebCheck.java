@@ -14,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.entity.EntityToggleGlideEvent;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -25,6 +26,7 @@ public final class NoWebCheck implements Listener {
 
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
+    private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
     private long serverTick;
 
     public NoWebCheck(KeenAC plugin) {
@@ -46,10 +48,20 @@ public final class NoWebCheck implements Listener {
         // Administrative/plugin teleports must remain possible and reset this check.
         if (event instanceof PlayerTeleportEvent) {
             states.remove(id);
+            elytraGraceUntilNanos.remove(id);
             return;
         }
 
         if (!plugin.getConfig().getBoolean("checks.no-web.enabled", true)) {
+            states.remove(id);
+            return;
+        }
+
+        long now = System.nanoTime();
+        // Elytra flight is allowed to carry the player through cobwebs. A short
+        // grace period after either glide transition also covers the collision
+        // tick where the server may stop gliding while the player is in the web.
+        if (player.isGliding() || isInsideElytraGrace(id, now)) {
             states.remove(id);
             return;
         }
@@ -64,7 +76,6 @@ public final class NoWebCheck implements Listener {
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
-        long now = System.nanoTime();
         double maxDistance = getAllowedMoveDistance(player, state, now);
         if (state != null) {
             state.lastMovementNanos = now;
@@ -160,6 +171,25 @@ public final class NoWebCheck implements Listener {
         }
 
         state.lastSafe = to.clone();
+    }
+
+    private boolean isInsideElytraGrace(UUID id, long now) {
+        Long until = elytraGraceUntilNanos.get(id);
+        if (until == null) return false;
+        if (now <= until) return true;
+        elytraGraceUntilNanos.remove(id, until);
+        return false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onGlideToggle(EntityToggleGlideEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        UUID id = player.getUniqueId();
+        long graceMillis = Math.max(0L,
+                Math.min(10_000L, plugin.getConfig().getLong("checks.no-web.elytra-grace-ms", 2500L)));
+        elytraGraceUntilNanos.put(id, System.nanoTime() + graceMillis * 1_000_000L);
+        // Do not let an earlier web violation/anchor carry over into Elytra flight.
+        states.remove(id);
     }
 
     private void decayStates() {
@@ -283,7 +313,9 @@ public final class NoWebCheck implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        states.remove(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        states.remove(id);
+        elytraGraceUntilNanos.remove(id);
     }
 
     private static final class PlayerState {
