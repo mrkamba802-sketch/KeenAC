@@ -626,7 +626,10 @@ public final class MotionCheck implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void preventGlidingWhileFrozen(PlayerToggleGlideEvent event) {
-        if (isFrozen(event.getPlayer().getUniqueId(), System.currentTimeMillis())) {
+        // Allow the player to stop gliding, but never allow a new glide to start
+        // while a hard setback freeze is active.
+        if (event.isGliding()
+                && isFrozen(event.getPlayer().getUniqueId(), System.currentTimeMillis())) {
             event.setCancelled(true);
         }
     }
