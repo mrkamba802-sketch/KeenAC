@@ -44,6 +44,7 @@ public final class AirStuckCheck {
         serverTick++;
 
         if (!plugin.getConfig().getBoolean("checks.air-stuck.enabled", true)) {
+            packetPositions.clear();
             for (Map.Entry<UUID, PlayerState> entry : states.entrySet()) {
                 Player player = Bukkit.getPlayer(entry.getKey());
                 if (player != null) {
