@@ -120,7 +120,7 @@ public final class BaritoneCheck implements Listener {
                 Math.min(60.0, plugin.getConfig().getDouble(
                         "checks.baritone.yaw-turn-tolerance-degrees", 28.0)));
         alertCooldownNanos = Math.max(2_000L,
-                plugin.get.getConfig().getLong("checks.baritone.alert-cooldown-ms", 15000L))
+                plugin.getConfig().getLong("checks.baritone.alert-cooldown-ms", 15000L))
                 * 1_000_000L;
         logContext = plugin.getConfig().getBoolean("checks.baritone.log-context", true);
     }
@@ -173,8 +173,11 @@ public final class BaritoneCheck implements Listener {
         int observedTurns = 0;
 
         synchronized (state) {
-            if (!state.worldId.equals(profile.worldId())
-                    || now - state.lastPacketNanos > 350_000_000L
+            if (!state.worldId.equals(profile.worldId())) {
+                states.put(id, new PacketState(profile.worldId(), x, z, yaw, now));
+                return;
+            }
+            if (now - state.lastPacketNanos > 350_000_000L
                     || now <= state.lastPacketNanos) {
                 state.reset(profile.worldId(), x, z, yaw, now);
                 return;
