@@ -13,6 +13,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
 
 import java.util.HashMap;
@@ -30,6 +33,7 @@ public final class NoWebCheck implements Listener {
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
     private final Map<UUID, Long> pearlGraceUntilNanos = new HashMap<>();
+    private final Map<UUID, Long> velocityGraceUntilNanos = new HashMap<>();
     private final Set<UUID> pearlBaselinePending = new java.util.HashSet<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
@@ -49,6 +53,7 @@ public final class NoWebCheck implements Listener {
             states.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
             lastPacketLocations.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
             pearlGraceUntilNanos.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
+            velocityGraceUntilNanos.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
         }, 1L, 1L);
     }
 
@@ -124,6 +129,24 @@ public final class NoWebCheck implements Listener {
             return;
         }
         if (pearlBaselinePending.remove(id)) {
+            states.remove(id);
+            lastPacketLocations.put(id, to.clone());
+            return;
+        }
+
+        // Server-applied knockback and plugin velocity changes can legitimately
+        // carry a player through a web. Re-baseline during the short impulse window.
+        if (isInsideVelocityGrace(id, now)) {
+            states.remove(id);
+            lastPacketLocations.put(id, to.clone());
+            return;
+        }
+
+        // These movement modes have additional physics that this web-specific
+        // horizontal/vertical envelope does not model reliably.
+        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()
+                || player.hasPotionEffect(PotionEffectType.LEVITATION)
+                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)) {
             states.remove(id);
             lastPacketLocations.put(id, to.clone());
             return;
@@ -258,6 +281,25 @@ public final class NoWebCheck implements Listener {
         return false;
     }
 
+    private boolean isInsideVelocityGrace(UUID id, long now) {
+        Long until = velocityGraceUntilNanos.get(id);
+        if (until == null) return false;
+        if (now <= until) return true;
+        velocityGraceUntilNanos.remove(id, until);
+        return false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onVelocity(PlayerVelocityEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        if (applyingCorrection.contains(id)) return;
+        long graceMillis = Math.max(0L, Math.min(2_000L,
+                plugin.getConfig().getLong("checks.no-web.velocity-grace-ms", 500L)));
+        velocityGraceUntilNanos.put(id,
+                System.nanoTime() + graceMillis * 1_000_000L);
+        states.remove(id);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onGlideToggle(EntityToggleGlideEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
@@ -314,26 +356,44 @@ public final class NoWebCheck implements Listener {
      * distance for every player and every connection.
      */
     private double getAllowedMoveDistance(Player player, PlayerState state, long now) {
-        double configured = Math.max(0.01,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.08));
+        // The configured value is a per-50-ms baseline, not a per-packet
+        // allowance. This keeps the limit consistent across packet batching.
+        double configuredPerTick = Math.max(0.01,
+                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.065));
+        double bufferPerTick = Math.max(0.0,
+                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.004));
 
-        double speedMultiplier = 1.0;
+        double attributeMultiplier = 1.0;
         AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
         if (movementSpeed != null && movementSpeed.getBaseValue() > 0.0) {
-            speedMultiplier = movementSpeed.getValue() / movementSpeed.getBaseValue();
-            // Avoid nonsensical values while preserving legitimate attribute/effect boosts.
-            speedMultiplier = Math.max(0.75, Math.min(4.0, speedMultiplier));
+            attributeMultiplier = movementSpeed.getValue() / movementSpeed.getBaseValue();
         }
 
-        double elapsedTickMultiplier = 1.0;
+        double potionMultiplier = 1.0;
+        PotionEffect speed = player.getPotionEffect(PotionEffectType.SPEED);
+        if (speed != null) {
+            potionMultiplier *= 1.0 + 0.2 * (speed.getAmplifier() + 1);
+        }
+        PotionEffect slowness = player.getPotionEffect(PotionEffectType.SLOWNESS);
+        if (slowness != null) {
+            potionMultiplier *= Math.max(0.05, 1.0 - 0.15 * (slowness.getAmplifier() + 1));
+        }
+        double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
+        double speedMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
+        speedMultiplier = Math.max(0.5, Math.min(3.0, speedMultiplier));
+
+        // Respect server-configured walk speed as well as vanilla attributes.
+        double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
+
+        double elapsedTicks = 1.0;
         if (state != null && state.lastMovementNanos > 0L) {
-            double elapsedTicks = (now - state.lastMovementNanos) / 50_000_000.0;
-            // A delayed movement packet may cover several server ticks.
-            // The cap prevents a long idle period from creating a huge allowance.
-            elapsedTickMultiplier = Math.max(1.0, Math.min(4.0, elapsedTicks));
+            double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
+            // Sub-tick packet spacing is normalized too; long stalls are capped.
+            elapsedTicks = Math.max(0.5, Math.min(4.0, elapsed));
         }
 
-        return configured * speedMultiplier * elapsedTickMultiplier + 0.01;
+        return (configuredPerTick * speedMultiplier * walkMultiplier + bufferPerTick)
+                * elapsedTicks;
     }
 
     private void returnToAnchor(Player player, Location requested, PlayerState state) {
@@ -402,6 +462,7 @@ public final class NoWebCheck implements Listener {
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
         pearlGraceUntilNanos.remove(id);
+        velocityGraceUntilNanos.remove(id);
         pearlBaselinePending.remove(id);
         lastPacketLocations.remove(id);
         packetPositions.remove(id);
@@ -411,6 +472,7 @@ public final class NoWebCheck implements Listener {
         states.clear();
         elytraGraceUntilNanos.clear();
         pearlGraceUntilNanos.clear();
+        velocityGraceUntilNanos.clear();
         pearlBaselinePending.clear();
         lastPacketLocations.clear();
         packetPositions.clear();
