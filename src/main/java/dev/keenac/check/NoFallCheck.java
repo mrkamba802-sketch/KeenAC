@@ -356,6 +356,18 @@ public final class NoFallCheck implements Listener {
                 return;
             }
 
+            // Packet ground claims are only preliminary evidence. A fall is
+            // not a NoFall violation unless suspicious claims were observed
+            // during the airborne interval AND normal FALL damage did not occur.
+            // This avoids flagging legitimate falls due to occasional packet
+            // desynchronization or ground-bit noise.
+            if (!episode.suspicionFlagged) {
+                episode.resetTracking();
+                lastSafePositions.put(id, player.getLocation().clone());
+                lastSafePositionAt.put(id, System.currentTimeMillis());
+                return;
+            }
+
             // Use the complete server-observed drop, not the client's
             // fallDistance field, which the NoFall modification may spoof.
             double serverDrop = safePosition != null && safePosition.getWorld() == landingWorld
@@ -405,30 +417,11 @@ public final class NoFallCheck implements Listener {
             return;
         }
 
-        if (!episode.suspicionFlagged) {
-            int vl = violations.merge(player.getUniqueId(), 1, (current, one) ->
-                    current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-            episode.suspicionFlagged = true;
-            episode.nextSuspicionClaim = episode.totalClientGroundClaims + 5;
-            plugin.getAlertManager().send("NoFall", player, vl);
-            if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
-                plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                        "NoFall airborne suspicion for %s (VL=%d, consecutiveGroundClaims=%d, fallDistance=%.2f)",
-                        player.getName(), vl, episode.clientGroundClaims, measuredFall));
-            }
-        } else if (episode.totalClientGroundClaims >= episode.nextSuspicionClaim) {
-            int additional = 1 + Math.max(0,
-                    (episode.totalClientGroundClaims - episode.nextSuspicionClaim) / 5);
-            int vl = violations.merge(player.getUniqueId(), additional, (current, add) ->
-                    current > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : current + add);
-            episode.nextSuspicionClaim += additional * 5;
-            plugin.getAlertManager().send("NoFall", player, vl);
-            if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
-                plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                        "NoFall repeated suspicion for %s (VL=%d, groundClaims=%d, fallDistance=%.2f)",
-                        player.getName(), vl, episode.totalClientGroundClaims, measuredFall));
-            }
-        }
+        // Do not alert or increase VL while the player is still falling.
+        // Legitimate clients can occasionally report onGround during packet
+        // desynchronization. Remember the evidence and decide only after
+        // landing, when the expected vanilla FALL event can be checked.
+        episode.suspicionFlagged = true;
     }
 
     private double landingPositionY(FallEpisode episode, double fallback) {
