@@ -17,6 +17,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
 
 import java.util.HashMap;
@@ -482,9 +483,8 @@ public final class NoWebCheck implements Listener {
         World world = location.getWorld();
         if (world == null) return false;
 
-        // Approximate the player's standing hitbox (0.6 wide, 1.8 high) and
-        // inspect every block it overlaps, including webs at head/body height.
-        // Use Bukkit's pose-aware hitbox and shift it to the packet position.
+        // Inspect every block overlapped by the player's current pose-aware
+        // bounding box, shifted to the packet position.
         // The epsilon excludes blocks that only touch the box at an exact edge.
         BoundingBox box = player.getBoundingBox();
         Location current = player.getLocation();
