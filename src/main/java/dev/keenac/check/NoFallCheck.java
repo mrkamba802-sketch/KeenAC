@@ -258,9 +258,8 @@ public final class NoFallCheck implements Listener {
     }
 
     /**
-     * Confirms one suspicion per fall episode. The latest packet must still
-     * claim onGround, and a fresh collision check must show that the player
-     * has not actually landed.
+     * Confirms one suspicion per fall episode. The client must still claim
+     * onGround; damage is resolved at landing so the full fall height is used.
      */
     private void confirmViolation(UUID id, long episodeId, double fallDistance,
                                   org.bukkit.World packetWorld, long suspectedAtNanos,
@@ -304,6 +303,28 @@ public final class NoFallCheck implements Listener {
             return;
         }
 
+        // Keep following the vertical trajectory until it reaches a real
+        // landing. This preserves the full height on large drops instead of
+        // applying only the first few blocks of damage mid-fall.
+        if (!hasSolidSupport(player)
+                && now - suspectedAtNanos < MAX_CONFIRMATION_WAIT_NANOS) {
+            synchronized (state) {
+                if (state.episodeId != episodeId || !state.confirmationPending
+                        || !state.lastClientOnGround || state.violationHandled) {
+                    return;
+                }
+                double currentY = player.getLocation().getY();
+                double packetDrop = state.hasPacketY
+                        ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, currentY))
+                        : 0.0;
+                state.candidateFallDistance = Math.max(state.candidateFallDistance, packetDrop);
+            }
+            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmViolation(
+                    id, episodeId, fallDistance, packetWorld, suspectedAtNanos,
+                    safePosition, safePositionAtMillis), 2L);
+            return;
+        }
+
         int vl;
         double confirmedFallDistance;
         synchronized (state) {
@@ -317,7 +338,7 @@ public final class NoFallCheck implements Listener {
                     : 0.0;
             double anchoredDrop = safePosition != null && safePosition.getWorld() == player.getWorld()
                     ? Math.max(0.0, safePosition.getY() - currentY) : 0.0;
-            confirmedFallDistance = Math.max(fallDistance,
+            confirmedFallDistance = Math.max(Math.max(fallDistance, state.candidateFallDistance),
                     Math.max(player.getFallDistance(), Math.max(packetDrop, anchoredDrop)));
             state.confirmationPending = false;
             state.violationHandled = true;
@@ -556,6 +577,8 @@ public final class NoFallCheck implements Listener {
             org.bukkit.World world,
             Location lastSafePosition,
             long lastSafePositionAt) { }
+
+    private static final long MAX_CONFIRMATION_WAIT_NANOS = 30_000_000_000L;
 
     private static final class PacketState {
         private long episodeId;
