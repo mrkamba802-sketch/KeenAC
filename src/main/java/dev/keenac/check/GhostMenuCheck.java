@@ -234,7 +234,7 @@ public final class GhostMenuCheck implements Listener {
 
                 // High vertical displacement is a separate GhostHand signal;
                 // regular small step-height changes remain ignored.
-                if (updateVerticalWindow(state, sample.y, sample.atNanos)
+                if (state.updateVerticalWindow(sample.y, sample.atNanos)
                         >= HIGH_JUMP_DISTANCE) {
                     boolean closed = reportViolation(player, sample.atNanos, state,
                             Math.abs(dy) / (elapsed / 1_000_000_000.0));
