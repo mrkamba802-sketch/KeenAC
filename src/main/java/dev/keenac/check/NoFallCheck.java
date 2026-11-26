@@ -413,7 +413,10 @@ public final class NoFallCheck implements Listener {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     Block block = player.getWorld().getBlockAt(x, y, z);
-                    if (block.getCollisionShape().overlaps(probe)) {
+                    // Block#getCollisionShape() is expressed in block-local
+                    // coordinates. Calculate the shape at its world location
+                    // before comparing it to the player's world-space hitbox.
+                    if (block.getBlockData().getCollisionShape(block.getLocation()).overlaps(probe)) {
                         return true;
                     }
                 }
