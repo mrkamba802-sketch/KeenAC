@@ -110,7 +110,8 @@ public final class InvHitCheck implements Listener {
 
         int violationLevel = violationLevels.merge(id, 1, Integer::sum);
         lastAlertNanos.put(id, now);
-        plugin.getAlertManager().send("InvHit", player, violationLevel);
+        plugin.getAlertManager().send("InvHit", player, violationLevel,
+                "An attack was attempted while a server-side inventory or container screen was open.");
     }
 
     @EventHandler
