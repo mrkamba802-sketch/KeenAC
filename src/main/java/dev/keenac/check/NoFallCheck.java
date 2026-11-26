@@ -154,7 +154,7 @@ public final class NoFallCheck implements Listener {
                         boolean repeatedFalseGround = episode.clientGroundClaims >= requiredGroundPackets
                                 && episode.firstClientGroundClaimNanos > 0L
                                 && now - episode.firstClientGroundClaimNanos <= packetWindowNanos;
-                        if (measuredFall >= minimumFallDistance) {
+                        if (measuredFall >= minimumFallDistance - 0.05) {
                             if (!episode.suspicionFlagged && repeatedFalseGround) {
                                 flagSuspicion(player, episode, measuredFall);
                             } else if (episode.suspicionFlagged
@@ -172,7 +172,7 @@ public final class NoFallCheck implements Listener {
                             Math.max(0.0, episode.peakY - location.getY()));
                     episode.falling = false;
 
-                    if (!safeLanding && measuredFall >= minimumFallDistance) {
+                    if (!safeLanding && measuredFall >= minimumFallDistance - 0.05) {
                         episode.landingPending = true;
                         episode.landingFallDistance = measuredFall;
                         episode.landingLocation = location.clone();
@@ -339,7 +339,7 @@ public final class NoFallCheck implements Listener {
                 || player.getWorld() != landingWorld
                 || player.isInsideVehicle() || player.isFlying() || player.isGliding()
                 || player.isSwimming() || player.isRiptiding() || player.isInWater()
-                || player.isInLava()
+                || player.isInLava() || !hasSolidSupport(player)
                 || player.getGameMode() == GameMode.CREATIVE
                 || player.getGameMode() == GameMode.SPECTATOR
                 || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
