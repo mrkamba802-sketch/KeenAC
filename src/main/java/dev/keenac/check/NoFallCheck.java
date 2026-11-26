@@ -143,7 +143,7 @@ public final class NoFallCheck implements Listener {
                 if (episode.falling) {
                     double measuredFall = Math.max(
                             player.getFallDistance(),
-                            Math.max(0.0, episode.peakY - Math.min(episode.lowestY, location.getY())));
+                            Math.max(0.0, episode.peakY - location.getY()));
                     episode.falling = false;
 
                     if (!safeLanding && measuredFall > minimumFallDistance) {
