@@ -172,7 +172,10 @@ public final class ReachCheck implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Player player = Bukkit.getPlayer(attackerId);
                 if (player != null && player.isOnline()) {
-                    plugin.getAlertManager().send("Reach", player, alertVl);
+                    plugin.getAlertManager().send("Reach", player, alertVl,
+                            String.format(java.util.Locale.ROOT,
+                                    "Attack distance %.3f blocks exceeded the allowed limit %.3f blocks.",
+                                    measured, limit));
                     plugin.getLogger().fine(String.format(java.util.Locale.ROOT,
                             "Reach review for %s (VL=%d, distance=%.3f, limit=%.3f)",
                             player.getName(), alertVl, measured, limit));
