@@ -12,18 +12,14 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.EntityToggleGlideEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
-import org.bukkit.event.vehicle.VehicleEnterEvent;
-import org.bukkit.util.Vector;
 
 import java.util.Map;
 import java.util.UUID;
@@ -38,9 +34,7 @@ public final class GhostMenuCheck implements Listener {
     private static final long MAX_MOVEMENT_GAP_NANOS = 300_000_000L;
     private static final int MAX_QUEUED_SAMPLES = 256;
     private static final int TRIMMED_QUEUE_SIZE = 128;
-    private static final double POSITION_EPSILON = 0.000001;
     private static final double HIGH_JUMP_DISTANCE = 1.05;
-    private static final long FREEZE_ATTEMPT_ALERT_INTERVAL_MS = 150L;
 
     private final KeenAC plugin;
     private final java.util.Set<UUID> activeMenus = ConcurrentHashMap.newKeySet();
@@ -48,14 +42,9 @@ public final class GhostMenuCheck implements Listener {
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastViolationAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> externalMovementGraceUntil = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastGroundedPositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastGroundedAt = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> frozenUntil = new ConcurrentHashMap<>();
-    private final Map<UUID, Location> frozenPositions = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastFreezeAttemptAlert = new ConcurrentHashMap<>();
-    private final java.util.Set<UUID> applyingFreezeTeleports = ConcurrentHashMap.newKeySet();
     private final java.util.Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     public GhostMenuCheck(KeenAC plugin) {
@@ -70,12 +59,6 @@ public final class GhostMenuCheck implements Listener {
                 || !enabled()) {
             return;
         }
-        if (isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
-            event.setCancelled(true);
-            recordFrozenMovementAttempt(player);
-            return;
-        }
-
         UUID id = player.getUniqueId();
         activeMenus.add(id);
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
@@ -97,10 +80,6 @@ public final class GhostMenuCheck implements Listener {
             UUID id = event.getPlayer().getUniqueId();
             activeMenus.remove(id);
             states.remove(id);
-            // Each GUI session starts with a clean VL; nothing after close
-            // can inherit or extend a previous GhostMenu violation.
-            violationLevels.remove(id);
-            lastViolationAt.remove(id);
             ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
             if (queue != null) {
                 queue.clear();
@@ -139,21 +118,10 @@ public final class GhostMenuCheck implements Listener {
 
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             UUID id = player.getUniqueId();
-            decayViolationLevel(id, nowMillis);
 
-            // Creative players are excluded from the entire check, including
-            // any freeze that may have been started before their mode changed.
+            // Creative players are excluded from this check.
             if (player.getGameMode() == GameMode.CREATIVE) {
                 clearCreativeState(id);
-                continue;
-            }
-
-            if (isFrozen(id, nowMillis)) {
-                player.setVelocity(new Vector(0.0, 0.0, 0.0));
-                ConcurrentLinkedQueue<PacketPosition> frozenQueue = packetPositions.get(id);
-                if (frozenQueue != null) {
-                    frozenQueue.clear();
-                }
                 continue;
             }
 
@@ -166,8 +134,6 @@ public final class GhostMenuCheck implements Listener {
             if (!containerOpen) {
                 activeMenus.remove(id);
                 states.remove(id);
-                violationLevels.remove(id);
-                lastViolationAt.remove(id);
                 ConcurrentLinkedQueue<PacketPosition> stale = packetPositions.get(id);
                 if (stale != null) {
                     stale.clear();
@@ -301,12 +267,7 @@ public final class GhostMenuCheck implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onVelocity(PlayerVelocityEvent event) {
-        Player player = event.getPlayer();
-        if (isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
-            event.setVelocity(new Vector(0.0, 0.0, 0.0));
-            return;
-        }
-        grantExternalMovementGrace(player);
+        grantExternalMovementGrace(event.getPlayer());
     }
 
     // Any hit, including a cancelled one, grants time for legitimate knockback.
@@ -317,91 +278,14 @@ public final class GhostMenuCheck implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void onJump(PlayerJumpEvent event) {
-        if (isFrozen(event.getPlayer().getUniqueId(), System.currentTimeMillis())) {
-            event.setCancelled(true);
-            recordFrozenMovementAttempt(event.getPlayer());
-        }
-    }
-
-    /** Reject all positional changes during the 2.5-second freeze, even tiny ones. */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void enforceFreeze(PlayerMoveEvent event) {
-        if (event instanceof PlayerTeleportEvent) {
-            return;
-        }
-
-        Player player = event.getPlayer();
-        UUID id = player.getUniqueId();
-        if (!isFrozen(id, System.currentTimeMillis())) {
-            return;
-        }
-
-        Location from = event.getFrom();
-        Location to = event.getTo();
-        if (to == null || from.getWorld() != to.getWorld()) {
-            return;
-        }
-
-        Location locked = frozenPositions.get(id);
-        if (locked == null || locked.getWorld() != to.getWorld()) {
-            locked = from.clone();
-            frozenPositions.put(id, locked.clone());
-        }
-        if (Math.abs(to.getX() - locked.getX()) > POSITION_EPSILON
-                || Math.abs(to.getY() - locked.getY()) > POSITION_EPSILON
-                || Math.abs(to.getZ() - locked.getZ()) > POSITION_EPSILON) {
-            Location correction = locked.clone();
-            correction.setYaw(to.getYaw());
-            correction.setPitch(to.getPitch());
-            event.setTo(correction);
-            recordFrozenMovementAttempt(player);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void preventGlidingWhileFrozen(EntityToggleGlideEvent event) {
-        if (event.getEntity() instanceof Player player && event.isGliding()
-                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
-            event.setCancelled(true);
-            recordFrozenMovementAttempt(player);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void preventVehicleEntryWhileFrozen(VehicleEnterEvent event) {
-        if (event.getEntered() instanceof Player player
-                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
-            event.setCancelled(true);
-            recordFrozenMovementAttempt(player);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void preventTeleportWhileFrozen(PlayerTeleportEvent event) {
-        UUID id = event.getPlayer().getUniqueId();
-        if (applyingFreezeTeleports.contains(id) || applyingSetbacks.contains(id)) {
-            return;
-        }
-        if (isFrozen(id, System.currentTimeMillis())) {
-            event.setCancelled(true);
-            recordFrozenMovementAttempt(event.getPlayer());
-        }
-    }
-
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        if (applyingFreezeTeleports.contains(id) || applyingSetbacks.contains(id)) {
+        if (applyingSetbacks.contains(id)) {
             return;
         }
         clearTracking(id);
         violationLevels.remove(id);
-        lastViolationAt.remove(id);
-        frozenUntil.remove(id);
-        frozenPositions.remove(id);
-        lastFreezeAttemptAlert.remove(id);
         lastGroundedPositions.remove(id);
         lastGroundedAt.remove(id);
     }
@@ -418,12 +302,8 @@ public final class GhostMenuCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         clearTracking(id);
         violationLevels.remove(id);
-        lastViolationAt.remove(id);
-        frozenUntil.remove(id);
-        frozenPositions.remove(id);
         lastGroundedPositions.remove(id);
         lastGroundedAt.remove(id);
-        lastFreezeAttemptAlert.remove(id);
     }
 
     @EventHandler
@@ -431,10 +311,6 @@ public final class GhostMenuCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         clearTracking(id);
         violationLevels.remove(id);
-        lastViolationAt.remove(id);
-        frozenUntil.remove(id);
-        frozenPositions.remove(id);
-        lastFreezeAttemptAlert.remove(id);
         lastGroundedPositions.remove(id);
         lastGroundedAt.remove(id);
     }
@@ -474,13 +350,13 @@ public final class GhostMenuCheck implements Listener {
         UUID id = player.getUniqueId();
         int level = violationLevels.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-        lastViolationAt.put(id, System.currentTimeMillis());
 
         // No per-check cooldown: staff see each escalation as x1, x2, x3...
-        plugin.getAlertManager().send("GhostHand", player, level);
+        plugin.getAlertManager().send("GhostMenu", player, level,
+                "Player moved abnormally while a server-side menu was open.");
         if (plugin.getConfig().getBoolean("checks.ghost-menu.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                    "GhostHand suspicion for %s (VL=%d, menu=%s, speed=%.2f, distance=%.3f, samples=%d)",
+                    "GhostMenu suspicion for %s (VL=%d, menu=%s, speed=%.2f, distance=%.3f, samples=%d)",
                     player.getName(), level, state.menuType, speed, state.distance, state.samples));
         }
 
@@ -495,42 +371,9 @@ public final class GhostMenuCheck implements Listener {
         return level >= 3;
     }
 
-    private void freezePlayer(Player player, MenuState state) {
-        UUID id = player.getUniqueId();
-        long now = System.currentTimeMillis();
-        Location current = player.getLocation();
-        Location grounded = lastGroundedPositions.get(id);
-        long groundedAt = lastGroundedAt.getOrDefault(id, 0L);
-        Location safe = state.safePosition;
-        Location anchor = safe != null && safe.getWorld() == current.getWorld()
-                ? safe.clone()
-                : grounded != null && grounded.getWorld() == current.getWorld()
-                        && now - groundedAt <= 5000L ? grounded.clone() : current.clone();
-        anchor.setYaw(current.getYaw());
-        anchor.setPitch(current.getPitch());
-
-        long duration = Math.max(2500L,
-                plugin.getConfig().getLong("checks.ghost-menu.freeze-duration-ms", 2500L));
-        frozenPositions.put(id, anchor.clone());
-        frozenUntil.put(id, now + duration);
-        lastFreezeAttemptAlert.put(id, now);
-
-        player.closeInventory();
-        applyingFreezeTeleports.add(id);
-        try {
-            if (player.getWorld() == anchor.getWorld()) {
-                player.teleport(anchor, PlayerTeleportEvent.TeleportCause.PLUGIN);
-            }
-        } finally {
-            applyingFreezeTeleports.remove(id);
-        }
-        player.setVelocity(new Vector(0.0, 0.0, 0.0));
-    }
-
-    /** A fresh attempt while frozen escalates VL and renews the 2.5-second lock. */
     /**
-     * Roll back to the last position reached before suspicious GUI movement.
-     * Similar to NoWeb, only ordinary movement updates the saved anchor.
+     * Apply a light rollback to the last safe position. No movement lock or
+     * velocity suppression is applied, so normal movement resumes immediately.
      */
     private void applySetback(Player player, MenuState state) {
         UUID id = player.getUniqueId();
@@ -568,7 +411,6 @@ public final class GhostMenuCheck implements Listener {
             if (queue != null) {
                 queue.clear();
             }
-            player.setVelocity(new Vector(0.0, 0.0, 0.0));
         } else {
             plugin.getLogger().fine("GhostMenu setback could not be applied to "
                     + player.getName() + ".");
@@ -581,74 +423,9 @@ public final class GhostMenuCheck implements Listener {
                 current.getYaw(), current.getPitch());
     }
 
-    private void decayViolationLevel(UUID id, long now) {
-        Long lastViolation = lastViolationAt.get(id);
-        if (lastViolation == null) {
-            return;
-        }
-        long decayMillis = Math.max(1000L,
-                plugin.getConfig().getLong("checks.ghost-menu.violation-decay-ms", 5000L));
-        if (now - lastViolation < decayMillis) {
-            return;
-        }
-
-        Integer current = violationLevels.get(id);
-        if (current == null || current <= 1) {
-            violationLevels.remove(id);
-            lastViolationAt.remove(id);
-        } else {
-            violationLevels.put(id, current - 1);
-            lastViolationAt.put(id, now);
-        }
-    }
-
-    private void recordFrozenMovementAttempt(Player player) {
-        UUID id = player.getUniqueId();
-        long now = System.currentTimeMillis();
-        long previous = lastFreezeAttemptAlert.getOrDefault(id, 0L);
-        if (now - previous < FREEZE_ATTEMPT_ALERT_INTERVAL_MS) {
-            return;
-        }
-        lastFreezeAttemptAlert.put(id, now);
-
-        int level = violationLevels.merge(id, 1, (current, one) ->
-                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-        lastViolationAt.put(id, now);
-        plugin.getAlertManager().send("GhostHand", player, level);
-
-        long duration = Math.max(2500L,
-                plugin.getConfig().getLong("checks.ghost-menu.freeze-duration-ms", 2500L));
-        frozenUntil.put(id, now + duration);
-        player.closeInventory();
-        player.setVelocity(new Vector(0.0, 0.0, 0.0));
-
-        if (plugin.getConfig().getBoolean("checks.ghost-menu.log-context", true)) {
-            plugin.getLogger().info("GhostHand freeze movement attempt for "
-                    + player.getName() + " (VL=" + level + ").");
-        }
-    }
-
-    private boolean isFrozen(UUID id, long now) {
-        Long until = frozenUntil.get(id);
-        if (until == null) {
-            return false;
-        }
-        if (now >= until) {
-            frozenUntil.remove(id, until);
-            frozenPositions.remove(id);
-            lastFreezeAttemptAlert.remove(id);
-            return false;
-        }
-        return true;
-    }
-
     private void clearCreativeState(UUID id) {
         clearTracking(id);
         violationLevels.remove(id);
-        frozenUntil.remove(id);
-        frozenPositions.remove(id);
-        lastFreezeAttemptAlert.remove(id);
-        lastViolationAt.remove(id);
         lastGroundedPositions.remove(id);
         lastGroundedAt.remove(id);
     }
@@ -668,14 +445,10 @@ public final class GhostMenuCheck implements Listener {
         states.clear();
         externalMovementGraceUntil.clear();
         violationLevels.clear();
-        lastViolationAt.clear();
         packetPositions.values().forEach(ConcurrentLinkedQueue::clear);
-        frozenUntil.clear();
-        frozenPositions.clear();
         lastFreezeAttemptAlert.clear();
         lastGroundedPositions.clear();
         lastGroundedAt.clear();
-        applyingFreezeTeleports.clear();
         applyingSetbacks.clear();
     }
 
@@ -703,7 +476,7 @@ public final class GhostMenuCheck implements Listener {
     }
 
     private double minimumHorizontalSpeed() {
-        // A normal walk should never be enough to trigger GhostHand.
+        // A normal walk should never be enough to trigger GhostMenu.
         // Keep this floor even when an older config still contains 1.8.
         return Math.max(2.5, plugin.getConfig().getDouble(
                 "checks.ghost-menu.minimum-horizontal-speed", 2.5));
