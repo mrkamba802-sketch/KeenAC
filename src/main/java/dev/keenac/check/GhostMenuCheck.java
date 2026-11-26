@@ -11,27 +11,31 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
-import org.bukkit.event.inventory.InventoryType;
 
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Packet-driven movement review while a server-side GUI is open.
- * Bukkit events are used only for GUI lifecycle and exemptions; movement
- * coordinates are supplied by PacketEvents.
+ * Reviews packet movement while a server-side GUI is open.
+ * Packet callbacks only append immutable samples; all Bukkit access and
+ * evaluation happen from tick() on the primary server thread.
  */
 public final class GhostMenuCheck implements Listener {
     private static final long MAX_MOVEMENT_GAP_NANOS = 300_000_000L;
+    private static final int MAX_QUEUED_SAMPLES = 256;
+    private static final int TRIMMED_QUEUE_SIZE = 128;
 
     private final KeenAC plugin;
     private final Map<UUID, MenuState> states = new ConcurrentHashMap<>();
-    private final Map<UUID, PacketPosition> packetPositions = new ConcurrentHashMap<>();
+    private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
+            new ConcurrentHashMap<>();
     private final Map<UUID, Long> personalInventoryClicks = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastAlerts = new ConcurrentHashMap<>();
@@ -49,11 +53,13 @@ public final class GhostMenuCheck implements Listener {
         }
 
         UUID id = player.getUniqueId();
+        ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
+        if (queue != null) {
+            queue.clear();
+        }
         MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
-        state.begin(MenuSource.CONTAINER, System.nanoTime(),
-                player.getOpenInventory().getType().name(),
-                player.getLocation().getX(), player.getLocation().getZ(),
-                openGraceNanos());
+        state.begin(MenuSource.CONTAINER, System.nanoTime(), event.getView().getType().name(),
+                player.getLocation().getX(), player.getLocation().getZ(), openGraceNanos());
         personalInventoryClicks.remove(id);
     }
 
@@ -63,31 +69,44 @@ public final class GhostMenuCheck implements Listener {
             UUID id = event.getPlayer().getUniqueId();
             states.remove(id);
             personalInventoryClicks.remove(id);
+            ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
+            if (queue != null) {
+                queue.clear();
+            }
         }
     }
 
     /**
-     * PacketEvents entry point. It only stores primitive values and is safe to
-     * call from a network thread; Bukkit APIs are never accessed here.
+     * PacketEvents entry point: primitive values only, no Bukkit calls.
+     * A bounded queue preserves every recent positional sample instead of
+     * overwriting intermediate packets with only the newest location.
      */
     public void recordPacketPosition(UUID playerId, double x, double z) {
         if (playerId == null || !Double.isFinite(x) || !Double.isFinite(z)) {
             return;
         }
-        packetPositions.put(playerId, new PacketPosition(x, z, System.nanoTime()));
+
+        ConcurrentLinkedQueue<PacketPosition> queue =
+                packetPositions.computeIfAbsent(playerId, ignored -> new ConcurrentLinkedQueue<>());
+        queue.add(new PacketPosition(x, z, System.nanoTime()));
+
+        if (queue.size() > MAX_QUEUED_SAMPLES) {
+            for (int i = 0; i < MAX_QUEUED_SAMPLES - TRIMMED_QUEUE_SIZE; i++) {
+                if (queue.poll() == null) {
+                    break;
+                }
+            }
+        }
     }
 
-    /** Window 0 is the client-side player inventory; clicks are a bounded signal. */
+    /** Window 0 click is a short, best-effort signal for the client-side E inventory. */
     public void recordPersonalInventoryClick(UUID playerId) {
         if (playerId != null && enabled()) {
             personalInventoryClicks.put(playerId, System.nanoTime());
         }
     }
 
-    /**
-     * Called once per server tick. Packet coordinates are consumed on the main
-     * thread so inventory, movement-mode and world checks remain Bukkit-safe.
-     */
+    /** Called once per tick on the main thread. */
     public void tick() {
         if (!enabled()) {
             clearTrackingOnly();
@@ -99,95 +118,97 @@ public final class GhostMenuCheck implements Listener {
 
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             UUID id = player.getUniqueId();
-            PacketPosition packet = packetPositions.get(id);
-            if (packet == null) {
-                continue;
-            }
-
-            long personalClickAt = personalInventoryClicks.getOrDefault(id, 0L);
-            boolean personalInventoryOpen = personalClickAt > 0L
-                    && now - personalClickAt <= personalWindow;
-            if (personalClickAt > 0L && !personalInventoryOpen) {
-                personalInventoryClicks.remove(id, personalClickAt);
+            long clickAt = personalInventoryClicks.getOrDefault(id, 0L);
+            boolean personalInventoryOpen = clickAt > 0L && now - clickAt <= personalWindow;
+            if (clickAt > 0L && !personalInventoryOpen) {
+                personalInventoryClicks.remove(id, clickAt);
             }
 
             boolean containerOpen =
                     player.getOpenInventory().getType() != InventoryType.CRAFTING;
             if (!containerOpen && !personalInventoryOpen) {
                 states.remove(id);
-                continue;
-            }
-
-            MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
-            MenuSource source = containerOpen
-                    ? MenuSource.CONTAINER : MenuSource.PERSONAL_INVENTORY;
-            String menuType = containerOpen
-                    ? player.getOpenInventory().getType().name() : "PLAYER_INVENTORY";
-
-            if (state.source != source) {
-                state.begin(source, packet.atNanos, menuType,
-                        packet.x, packet.z, openGraceNanos());
-            }
-
-            if (packet.atNanos <= state.lastProcessedPacketNanos) {
-                continue;
-            }
-            state.lastProcessedPacketNanos = packet.atNanos;
-
-            if (packet.atNanos < state.graceUntilNanos
-                    || packet.atNanos < state.externalMovementGraceUntilNanos
-                    || isExempt(player)
-                    || player.getPing() > maxPing()) {
-                state.resetMovementWindow();
-                state.setPacketBaseline(packet);
-                continue;
-            }
-
-            if (state.lastPacketNanos == 0L) {
-                state.setPacketBaseline(packet);
-                continue;
-            }
-
-            long elapsed = packet.atNanos - state.lastPacketNanos;
-            double distance = Math.hypot(
-                    packet.x - state.lastPacketX,
-                    packet.z - state.lastPacketZ);
-            state.setPacketBaseline(packet);
-
-            if (elapsed <= 0L || elapsed > MAX_MOVEMENT_GAP_NANOS) {
-                state.resetMovementWindow();
-                continue;
-            }
-
-            if (distance < 0.035) {
-                if (state.sampleStartedNanos > 0L
-                        && packet.atNanos - state.sampleStartedNanos > sampleWindowNanos()) {
-                    state.resetMovementWindow();
+                ConcurrentLinkedQueue<PacketPosition> stale = packetPositions.get(id);
+                if (stale != null) {
+                    stale.clear();
                 }
                 continue;
             }
 
-            double speed = distance / (elapsed / 1_000_000_000.0);
-            if ((requireSprint() && !player.isSprinting())
-                    || speed < minimumHorizontalSpeed()) {
-                state.resetMovementWindow();
+            ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
+            if (queue == null) {
                 continue;
             }
 
-            if (state.samples == 0
-                    || packet.atNanos - state.sampleStartedNanos > sampleWindowNanos()) {
-                state.resetMovementWindow();
-                state.sampleStartedNanos = packet.atNanos;
-            }
+            MenuSource source = containerOpen
+                    ? MenuSource.CONTAINER : MenuSource.PERSONAL_INVENTORY;
+            String menuType = containerOpen
+                    ? player.getOpenInventory().getType().name() : "PLAYER_INVENTORY";
+            MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
 
-            state.samples++;
-            state.distance += distance;
+            PacketPosition sample;
+            int drained = 0;
+            while (drained++ < MAX_QUEUED_SAMPLES && (sample = queue.poll()) != null) {
+                if (state.source != source) {
+                    state.begin(source, sample.atNanos, menuType,
+                            sample.x, sample.z, openGraceNanos());
+                }
 
-            if (state.samples >= requiredSamples()
-                    && packet.atNanos - state.sampleStartedNanos >= requiredDurationNanos()
-                    && state.distance >= requiredDistance()) {
-                reportViolation(player, packet.atNanos);
-                state.resetMovementWindow();
+                if (sample.atNanos < state.graceUntilNanos
+                        || sample.atNanos < state.externalMovementGraceUntilNanos
+                        || player.getPing() > maxPing()
+                        || isExempt(player)) {
+                    state.resetMovementWindow();
+                    state.setPacketBaseline(sample);
+                    continue;
+                }
+
+                if (state.lastPacketNanos == 0L) {
+                    state.setPacketBaseline(sample);
+                    continue;
+                }
+
+                long elapsed = sample.atNanos - state.lastPacketNanos;
+                double distance = Math.hypot(
+                        sample.x - state.lastPacketX,
+                        sample.z - state.lastPacketZ);
+                state.setPacketBaseline(sample);
+
+                if (elapsed <= 0L || elapsed > MAX_MOVEMENT_GAP_NANOS) {
+                    state.resetMovementWindow();
+                    continue;
+                }
+
+                if (distance < 0.025) {
+                    if (state.samples > 0
+                            && sample.atNanos - state.sampleStartedNanos > sampleWindowNanos()) {
+                        state.resetMovementWindow();
+                    }
+                    continue;
+                }
+
+                double speed = distance / (elapsed / 1_000_000_000.0);
+                if ((requireSprint() && !player.isSprinting())
+                        || speed < minimumHorizontalSpeed()) {
+                    state.resetMovementWindow();
+                    continue;
+                }
+
+                if (state.samples == 0
+                        || sample.atNanos - state.sampleStartedNanos > sampleWindowNanos()) {
+                    state.resetMovementWindow();
+                    state.sampleStartedNanos = sample.atNanos;
+                }
+
+                state.samples++;
+                state.distance += distance;
+
+                if (state.samples >= requiredSamples()
+                        && sample.atNanos - state.sampleStartedNanos >= requiredDurationNanos()
+                        && state.distance >= requiredDistance()) {
+                    reportViolation(player, sample.atNanos, state, speed);
+                    state.resetMovementWindow();
+                }
             }
         }
 
@@ -230,8 +251,7 @@ public final class GhostMenuCheck implements Listener {
     private void grantExternalMovementGrace(Player player) {
         MenuState state = states.get(player.getUniqueId());
         if (state != null) {
-            state.externalMovementGraceUntilNanos =
-                    System.nanoTime() + velocityGraceNanos();
+            state.externalMovementGraceUntilNanos = System.nanoTime() + velocityGraceNanos();
             state.resetMovementWindow();
         }
     }
@@ -243,7 +263,7 @@ public final class GhostMenuCheck implements Listener {
                 || player.isGliding() || player.isSwimming()
                 || player.isClimbing() || player.isRiptiding()
                 || player.isInWater() || player.isInLava()
-                || player.isSleeping() || !player.isOnGround()) {
+                || player.isSleeping()) {
             return true;
         }
 
@@ -254,7 +274,7 @@ public final class GhostMenuCheck implements Listener {
                 || below == Material.SOUL_SAND || below == Material.SOUL_SOIL;
     }
 
-    private void reportViolation(Player player, long now) {
+    private void reportViolation(Player player, long now, MenuState state, double speed) {
         long previous = lastAlerts.getOrDefault(player.getUniqueId(), 0L);
         if (now - previous < alertCooldownNanos()) {
             return;
@@ -263,18 +283,26 @@ public final class GhostMenuCheck implements Listener {
         int level = violationLevels.merge(player.getUniqueId(), 1, Integer::sum);
         lastAlerts.put(player.getUniqueId(), now);
         plugin.getAlertManager().send("GhostMenu", player, level);
+        if (plugin.getConfig().getBoolean("checks.ghost-menu.log-context", true)) {
+            plugin.getLogger().info(String.format(java.util.Locale.ROOT,
+                    "GhostMenu review for %s (VL=%d, menu=%s, speed=%.2f, distance=%.2f, samples=%d)",
+                    player.getName(), level, state.menuType, speed, state.distance, state.samples));
+        }
     }
 
     private void clearTracking(UUID id) {
         states.remove(id);
-        packetPositions.remove(id);
         personalInventoryClicks.remove(id);
+        ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.remove(id);
+        if (queue != null) {
+            queue.clear();
+        }
     }
 
     private void clearTrackingOnly() {
         states.clear();
-        packetPositions.clear();
         personalInventoryClicks.clear();
+        packetPositions.values().forEach(ConcurrentLinkedQueue::clear);
     }
 
     public void clearAll() {
@@ -350,8 +378,6 @@ public final class GhostMenuCheck implements Listener {
         private String menuType;
         private long graceUntilNanos;
         private long externalMovementGraceUntilNanos;
-        private long lastMovementNanos;
-        private long lastProcessedPacketNanos;
         private long lastPacketNanos;
         private long sampleStartedNanos;
         private double lastPacketX;
@@ -364,11 +390,9 @@ public final class GhostMenuCheck implements Listener {
             this.source = source;
             this.menuType = menuType;
             this.graceUntilNanos = now + graceNanos;
-            this.lastMovementNanos = now;
             this.lastPacketX = x;
             this.lastPacketZ = z;
             this.lastPacketNanos = now;
-            this.lastProcessedPacketNanos = 0L;
             resetMovementWindow();
         }
 
