@@ -59,8 +59,8 @@ checks:
     # Maximum baseline displacement per 50 ms while touching a cobweb.
     # Effective allowance is adjusted for speed/slowness, sprint, sneak, shield,
     # Weaving, walk speed, and ice beneath the web. Older values are safely capped.
-    max-move-distance: 0.055
-    movement-buffer: 0.003
+    max-move-distance: 0.025
+    movement-buffer: 0.0015
     # Ignore short server-applied impulses such as knockback while re-baselining.
     velocity-grace-ms: 500
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
