@@ -1033,6 +1033,10 @@ public final class MotionCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onVelocity(PlayerVelocityEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        if (plugin.getMovementSetbackManager().isCorrectionLocked(id)) {
+            event.setVelocity(new Vector(0.0, 0.0, 0.0));
+            return;
+        }
         if (isFrozen(id, System.currentTimeMillis())) {
             event.setVelocity(new Vector(0.0, 0.0, 0.0));
             return;
