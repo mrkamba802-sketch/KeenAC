@@ -107,7 +107,7 @@ checks:
     # Delay the review briefly so a same-batch / slightly delayed swing packet can arrive.
     review-delay-ticks: 3
     max-ping-ms: 250
-    # Inventory click/move packets are excluded; only hotbar slot/action packet sequences count.
+    # Confirmed hotbar and window-0 inventory SWAP/action sequences are tracked; unrelated clicks are excluded.
     log-context: true
 
   motion:
@@ -115,8 +115,7 @@ checks:
     # Five independently sampled anomalies inside this rolling window trigger an alert.
     required-suspicions: 5
     suspicion-window-ms: 3000
-    # Prevent repeated alerts while the current review is active.
-    review-window-ms: 3000
+    # Motion re-review cadence follows alerts.delay-seconds.
     # Ignore movement shortly after server-side velocity changes (knockback, explosions, etc.).
     velocity-grace-ms: 1200
     # Ignore Motion samples briefly when elytra gliding starts or stops.
@@ -142,7 +141,8 @@ checks:
       multiplier: 1.30
       buffer-bps: 0.55
       confirm-samples: 3
-    packet-alert-cooldown-ms: 400
+    # Minimum interval between independent packet anomaly signals, not alert delivery.
+    packet-signal-interval-ms: 400
     # Log potion effects, effective movement attribute, velocity and movement states to console.
     log-context: true
 
