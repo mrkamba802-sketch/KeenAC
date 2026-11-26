@@ -253,6 +253,12 @@ public final class NoFallCheck implements Listener {
         if (episode == null) {
             return;
         }
+        // A spoofed onGround bit can make the server emit a FALL event
+        // before the player's hitbox has physically reached a supporting block.
+        // Only a damage event concurrent with real support proves a normal landing.
+        if (!hasSolidSupport(player)) {
+            return;
+        }
         synchronized (episode) {
             if (episode.falling || episode.landingPending) {
                 episode.fallDamageSeen = true;
