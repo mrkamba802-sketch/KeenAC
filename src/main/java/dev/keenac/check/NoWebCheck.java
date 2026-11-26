@@ -29,6 +29,7 @@ public final class NoWebCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
+    private final Map<UUID, Long> pearlGraceUntilNanos = new HashMap<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastPacketLocations = new HashMap<>();
@@ -108,6 +109,15 @@ public final class NoWebCheck implements Listener {
 
         if (to == null || from == null || from.getWorld() != to.getWorld()) {
             states.remove(id);
+            return;
+        }
+
+        // Ender Pearl teleports can place a player directly into a cobweb.
+        // Ignore packet displacement during the post-teleport settling window
+        // and keep the packet baseline at the destination to avoid stale deltas.
+        if (isInsidePearlGrace(id, now)) {
+            states.remove(id);
+            lastPacketLocations.put(id, to.clone());
             return;
         }
 
@@ -212,8 +222,30 @@ public final class NoWebCheck implements Listener {
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
         lastPacketLocations.remove(id);
+
+        if (event.getCause() == PlayerTeleportEvent.TeleportCause.ENDER_PEARL) {
+            long graceMillis = Math.max(250L, Math.min(5_000L,
+                    plugin.getConfig().getLong("checks.no-web.pearl-grace-ms", 1500L)));
+            pearlGraceUntilNanos.put(id,
+                    System.nanoTime() + graceMillis * 1_000_000L);
+            Location destination = event.getTo();
+            if (destination != null) {
+                lastPacketLocations.put(id, destination.clone());
+            }
+        } else {
+            pearlGraceUntilNanos.remove(id);
+        }
+
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
         if (queue != null) queue.clear();
+    }
+
+    private boolean isInsidePearlGrace(UUID id, long now) {
+        Long until = pearlGraceUntilNanos.get(id);
+        if (until == null) return false;
+        if (now <= until) return true;
+        pearlGraceUntilNanos.remove(id, until);
+        return false;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -359,6 +391,7 @@ public final class NoWebCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
+        pearlGraceUntilNanos.remove(id);
         lastPacketLocations.remove(id);
         packetPositions.remove(id);
     }
@@ -366,6 +399,7 @@ public final class NoWebCheck implements Listener {
     public void clearAll() {
         states.clear();
         elytraGraceUntilNanos.clear();
+        pearlGraceUntilNanos.clear();
         lastPacketLocations.clear();
         packetPositions.clear();
         applyingCorrection.clear();
