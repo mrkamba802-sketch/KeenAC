@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.util.Vector;
+import org.bukkit.util.BoundingBox;
 
 /**
  * PacketEvents NoFall signal. It compares the client's onGround bit with a
@@ -83,14 +84,15 @@ public final class NoFallCheck implements Listener {
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION);
             boolean safeSurface = isSafeLandingSurface(location);
+            boolean physicallySupported = hasSolidSupport(player);
             UUID id = player.getUniqueId();
-            if (player.isOnGround() && !safeSurface && !exemptMode) {
+            if (physicallySupported && !safeSurface && !exemptMode) {
                 lastSafePositions.put(id, location.clone());
                 lastSafePositionAt.put(id, System.currentTimeMillis());
             }
             profiles.put(id, new NoFallProfile(
                     enabled && !exemptMode,
-                    player.isOnGround(),
+                    physicallySupported,
                     safeSurface,
                     player.getPing(),
                     player.getFallDistance(),
@@ -130,7 +132,7 @@ public final class NoFallCheck implements Listener {
         synchronized (state) {
             // A server-confirmed landing or a damage-exempt surface ends the
             // current descent. The tracked packet height is kept only in air.
-            if (profile.serverOnGround || profile.safeSurface) {
+            if (profile.physicallySupported || profile.safeSurface) {
                 state.reset();
                 return;
             }
@@ -200,8 +202,8 @@ public final class NoFallCheck implements Listener {
             final long suspectedAt = suspectedAtNanos;
             final Location safePosition = candidateSafePosition;
             final long safePositionAt = candidateSafePositionAt;
-            Bukkit.getScheduler().runTask(plugin, () -> confirmViolation(
-                    id, fallDistance, profile.world, suspectedAt, safePosition, safePositionAt));
+            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmViolation(
+                    id, fallDistance, profile.world, suspectedAt, safePosition, safePositionAt), 1L);
         }
     }
 
@@ -223,7 +225,7 @@ public final class NoFallCheck implements Listener {
         }
 
         // Vanilla already handled the landing; do not apply a second hit.
-        if (lastFallDamageNanos.getOrDefault(id, 0L) >= suspectedAtNanos) {
+        if (lastFallDamageNanos.getOrDefault(id, 0L) >= suspectedAtNanos - 50_000_000L) {
             return;
         }
 
@@ -288,6 +290,42 @@ public final class NoFallCheck implements Listener {
         return damage;
     }
 
+    /**
+     * Detect physical block support independently of the client's onGround bit.
+     * Player#isOnGround can follow movement packet state on some server paths,
+     * which must not be the sole gate for a NoFall review.
+     */
+    private boolean hasSolidSupport(Player player) {
+        BoundingBox box = player.getBoundingBox();
+        double feetY = box.getMinY();
+        BoundingBox probe = new BoundingBox(
+                box.getMinX() + 0.01, feetY - 0.06, box.getMinZ() + 0.01,
+                box.getMaxX() - 0.01, feetY + 0.001, box.getMaxZ() - 0.01);
+
+        int minX = floor(probe.getMinX());
+        int maxX = floor(probe.getMaxX());
+        int minY = floor(probe.getMinY()) - 1;
+        int maxY = floor(probe.getMaxY());
+        int minZ = floor(probe.getMinZ());
+        int maxZ = floor(probe.getMaxZ());
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Block block = player.getWorld().getBlockAt(x, y, z);
+                    if (block.getCollisionShape().overlaps(probe)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private int floor(double value) {
+        return (int) Math.floor(value);
+    }
+
     private boolean isSafeLandingSurface(Location location) {
         // Inspect the feet block and the next two blocks below. This covers the
         // short landing window for blocks that cancel/reduce fall damage.
@@ -322,7 +360,7 @@ public final class NoFallCheck implements Listener {
                 || name.contains("DRIPLEAF");
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onFallDamage(EntityDamageEvent event) {
         if (event.getEntity() instanceof Player player
                 && event.getCause() == EntityDamageEvent.DamageCause.FALL) {
@@ -385,7 +423,7 @@ public final class NoFallCheck implements Listener {
 
     private record NoFallProfile(
             boolean eligible,
-            boolean serverOnGround,
+            boolean physicallySupported,
             boolean safeSurface,
             int ping,
             double fallDistance,
