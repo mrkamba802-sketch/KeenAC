@@ -319,7 +319,8 @@ public final class NoWebCheck implements Listener {
         state.violationLevel++;
         state.lastViolationTick = serverTick;
         state.lastViolationNanos = System.nanoTime();
-        plugin.getAlertManager().send("NoWeb", player, state.violationLevel);
+        plugin.getAlertManager().send("NoWeb", player, state.violationLevel,
+                "Player displacement exceeded the allowed movement while intersecting cobweb.");
     }
 
     private boolean intersectsCobweb(Player player, Location location) {
