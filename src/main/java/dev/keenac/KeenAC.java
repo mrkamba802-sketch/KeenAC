@@ -23,6 +23,7 @@ import dev.keenac.listener.PacketAutoSwapListener;
 import dev.keenac.listener.PacketAimListener;
 import dev.keenac.listener.PacketBaritoneListener;
 import dev.keenac.listener.PacketInvHitListener;
+import dev.keenac.listener.PacketGhostMenuListener;
 import dev.keenac.listener.PacketReachListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
@@ -48,6 +49,7 @@ public final class KeenAC extends JavaPlugin {
     private PacketListenerAbstract aimPacketListener;
     private PacketListenerAbstract reachPacketListener;
     private PacketListenerAbstract baritonePacketListener;
+    private PacketListenerAbstract ghostMenuPacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -80,12 +82,14 @@ public final class KeenAC extends JavaPlugin {
         aimPacketListener = new PacketAimListener(aimCheck);
         reachPacketListener = new PacketReachListener(reachCheck);
         baritonePacketListener = new PacketBaritoneListener(baritoneCheck);
+        ghostMenuPacketListener = new PacketGhostMenuListener(ghostMenuCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(aimPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(reachPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(ghostMenuPacketListener);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(ghostMenuCheck, this);
@@ -112,6 +116,7 @@ public final class KeenAC extends JavaPlugin {
             reachCheck.tick();
             motionCheck.tick();
             noFallCheck.tick();
+            ghostMenuCheck.tick();
             baritoneCheck.tick();
         }, 1L, 1L);
         getLogger().info("KeenAC enabled with PacketEvents " + PacketEvents.getAPI().getVersion() + ".");
@@ -152,6 +157,9 @@ public final class KeenAC extends JavaPlugin {
             }
             if (baritonePacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(baritonePacketListener);
+            }
+            if (ghostMenuPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(ghostMenuPacketListener);
             }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
