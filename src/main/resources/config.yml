@@ -56,8 +56,13 @@ checks:
 
   no-web:
     enabled: true
-    # Maximum allowed player displacement in one movement event while inside cobweb.
-    max-move-distance: 0.08
+    # Maximum baseline displacement per 50 ms while touching a cobweb.
+    # Effective allowance is adjusted for speed/slowness, sprint, sneak, shield,
+    # Weaving, walk speed, and ice beneath the web. Older values are safely capped.
+    max-move-distance: 0.055
+    movement-buffer: 0.003
+    # Ignore short server-applied impulses such as knockback while re-baselining.
+    velocity-grace-ms: 500
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
     elytra-grace-ms: 2500
     # Ignore stale/teleport movement samples after an Ender Pearl landing.
@@ -136,11 +141,13 @@ checks:
       freeze-duration-ms: 3500
       # Maximum age of the last grounded rollback point when no recent jump exists.
       safe-position-max-age-ms: 15000
-    # PacketEvents horizontal movement analysis; includes Speed and strafe acceleration.
+    # PacketEvents horizontal movement analysis against the estimated vanilla speed.
+    # A small excess is reviewed over a smoothed window to reduce packet-jitter noise.
     speed:
-      multiplier: 1.30
-      buffer-bps: 0.55
+      multiplier: 1.06
+      buffer-bps: 0.12
       confirm-samples: 3
+      sample-window-ms: 500
     # Minimum interval between independent packet anomaly signals, not alert delivery.
     packet-signal-interval-ms: 400
     # Log potion effects, effective movement attribute, velocity and movement states to console.
