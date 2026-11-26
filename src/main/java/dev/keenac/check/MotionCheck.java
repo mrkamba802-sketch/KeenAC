@@ -448,7 +448,10 @@ public final class MotionCheck implements Listener {
         // The explicit estimate is a fallback for server implementations that do not.
         double movementMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
         double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
-        double stanceMultiplier = player.isSneaking() ? 0.30 : 1.0;
+        var boots = player.getInventory().getBoots();
+        int swiftSneak = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SWIFT_SNEAK);
+        double stanceMultiplier = player.isSneaking()
+                ? Math.min(0.75, 0.30 + 0.15 * swiftSneak) : 1.0;
         if (player.isBlocking()) {
             stanceMultiplier *= 0.20;
         }
