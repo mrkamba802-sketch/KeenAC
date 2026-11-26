@@ -76,19 +76,18 @@ checks:
 
   silent-swap:
     enabled: true
-    # Require repeated switch -> main-hand action -> switch-back cycles.
-    # A single hotbar change or a lone action never raises VL.
-    required-cycles: 4
-    # Maximum duration of each complete temporary-slot cycle.
-    max-cycle-ms: 120
-    # Ignore impossible/duplicate near-zero packet pairs.
-    min-cycle-ms: 4
-    # All confirmed cycles must fit inside this rolling observation window.
-    observation-window-ms: 2500
-    # Skip reviews when latency makes packet timing unreliable.
-    max-ping-ms: 180
+    # Require two rapid slot -> attack -> return sequences without a main-hand swing packet.
+    # Packet bursts shorter than 4 ms are valid and are not discarded.
+    required-cycles: 2
+    max-cycle-ms: 100
+    observation-window-ms: 1600
+    # Correlate a normal main-hand animation packet before/after the attack.
+    swing-correlation-ms: 140
+    # Delay the review briefly so a same-batch / slightly delayed swing packet can arrive.
+    review-delay-ticks: 3
+    max-ping-ms: 250
     alert-cooldown-ms: 5000
-    # Advisory only: this check never cancels attacks or item interactions.
+    # Inventory click/move packets are excluded; only hotbar slot/action packet sequences count.
     log-context: true
 
   motion:
