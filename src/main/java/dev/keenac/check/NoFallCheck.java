@@ -106,6 +106,9 @@ public final class NoFallCheck implements Listener {
                 if (episode.world != null && episode.world != world) {
                     episode.resetTracking();
                 }
+                if (episode.falling && episode.world == null) {
+                    episode.world = world;
+                }
 
                 if (!supported) {
                     if (!episode.falling && !episode.landingPending) {
@@ -143,7 +146,7 @@ public final class NoFallCheck implements Listener {
                             Math.max(0.0, episode.peakY - Math.min(episode.lowestY, location.getY())));
                     episode.falling = false;
 
-                    if (!safeLanding && measuredFall >= minimumFallDistance) {
+                    if (!safeLanding && measuredFall > minimumFallDistance) {
                         episode.landingPending = true;
                         episode.landingFallDistance = measuredFall;
                         episode.landingLocation = location.clone();
@@ -264,7 +267,15 @@ public final class NoFallCheck implements Listener {
         FallEpisode episode = episodes.get(id);
         if (player == null || !player.isOnline() || player.isDead() || episode == null
                 || !plugin.getConfig().getBoolean("checks.no-fall.enabled", true)
-                || player.getWorld() != landingWorld) {
+                || player.getWorld() != landingWorld
+                || player.isInsideVehicle() || player.isFlying() || player.isGliding()
+                || player.isSwimming() || player.isRiptiding() || player.isInWater()
+                || player.isInLava()
+                || player.getGameMode() == GameMode.CREATIVE
+                || player.getGameMode() == GameMode.SPECTATOR
+                || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
+                || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)
+                || isSafeLandingSurface(player.getLocation())) {
             clearPending(episode, episodeId);
             return;
         }
