@@ -109,7 +109,7 @@ checks:
 
   no-fall:
     enabled: true
-    # Ignore short falls and require repeated client onGround claims.
+    # Ignore short falls; confirm suspicious onGround claims against packet descent and fall-damage events.
     minimum-fall-distance: 3.0
     # One confirmed onGround claim is enough once packet descent exceeds the limit;
     # real fall damage is checked on the following server tick before any action.
