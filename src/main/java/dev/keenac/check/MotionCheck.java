@@ -647,9 +647,9 @@ public final class MotionCheck implements Listener {
             return soulSpeed > 0 ? 1.0 : 0.58;
         }
         if (surface == Material.SOUL_SOIL) {
-            var boots = player.getInventory().getBoots();
-            int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
-            return soulSpeed > 0 ? 1.0 : 1.0;
+            // Soul Soil is not slowed like Soul Sand; Soul Speed's attribute
+            // modifier, when present, is already reflected in movementMultiplier.
+            return 1.0;
         }
         return 1.0;
     }
