@@ -42,7 +42,6 @@ public final class AimCheck implements Listener {
     private volatile int requiredMovingHits;
     private volatile int requiredSmoothApproaches;
     private volatile long observationWindowNanos;
-    private volatile long alertCooldownNanos;
     private volatile int maximumPingMillis;
 
     public AimCheck(KeenAC plugin) {
@@ -70,9 +69,6 @@ public final class AimCheck implements Listener {
                 plugin.getConfig().getInt("checks.aim.required-smooth-approaches", 4));
         observationWindowNanos = Math.max(2_000L,
                 plugin.getConfig().getLong("checks.aim.observation-window-ms", 8000L))
-                * 1_000_000L;
-        alertCooldownNanos = Math.max(1000L,
-                plugin.getConfig().getLong("checks.aim.alert-cooldown-ms", 5000L))
                 * 1_000_000L;
         maximumPingMillis = Math.max(50,
                 plugin.getConfig().getInt("checks.aim.max-ping-ms", 250));
@@ -222,10 +218,7 @@ public final class AimCheck implements Listener {
             state.observations.clear();
             state.violationLevel++;
             violationLevel = state.violationLevel;
-            if (now - state.lastAlertNanos >= alertCooldownNanos) {
-                state.lastAlertNanos = now;
-                alert = true;
-            }
+            alert = true;
         }
 
         if (alert) {
@@ -433,7 +426,6 @@ public final class AimCheck implements Listener {
         private float pitch;
         private int ping;
         private long lastPacketRotationNanos;
-        private long lastAlertNanos;
         private int violationLevel;
 
         private void resetEvidence() {
