@@ -19,7 +19,6 @@ import java.util.UUID;
 public final class WallHitCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, Integer> violations = new HashMap<>();
-    private final Map<UUID, Long> lastAlertMillis = new HashMap<>();
 
     public WallHitCheck(KeenAC plugin) { this.plugin = plugin; }
 
@@ -58,27 +57,18 @@ public final class WallHitCheck implements Listener {
 
         int vl = violations.merge(attackerId, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-        long now = System.currentTimeMillis();
-        long cooldown = Math.max(0L,
-                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
-        long previous = lastAlertMillis.getOrDefault(attackerId, 0L);
-        if (now - previous >= cooldown) {
-            plugin.getAlertManager().send("WallHit", attacker, vl,
-                    "Attack target was fully hidden behind a solid block; Line of Sight was blocked.");
-            lastAlertMillis.put(attackerId, now);
-        }
+        plugin.getAlertManager().send("WallHit", attacker, vl,
+                "Attack target was fully hidden behind a solid block; Line of Sight was blocked.");
     }
 
     @EventHandler
     public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         violations.remove(id);
-        lastAlertMillis.remove(id);
     }
 
     public void clearAll() {
         violations.clear();
-        lastAlertMillis.clear();
     }
 
     /*
