@@ -176,7 +176,9 @@ public final class NoFallCheck implements Listener {
                         episode.landingPending = true;
                         episode.landingFallDistance = measuredFall;
                         episode.landingLocation = location.clone();
-                        long token = ++episode.episodeId;
+                        // Keep the fall episode token stable so a FALL event
+                        // queued in this same tick can still be correlated.
+                        long token = episode.episodeId;
                         Location safe = episode.safePosition == null
                                 ? copyLocation(lastSafePositions.get(id))
                                 : episode.safePosition.clone();
@@ -313,7 +315,6 @@ public final class NoFallCheck implements Listener {
                 return;
             }
             token = episode.episodeId;
-            episode.fallDamageCandidate = true;
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             Player current = Bukkit.getPlayer(player.getUniqueId());
@@ -620,7 +621,6 @@ public final class NoFallCheck implements Listener {
         private boolean falling;
         private boolean landingPending;
         private boolean fallDamageSeen;
-        private boolean fallDamageCandidate;
         private boolean violationHandled;
         private boolean suspicionFlagged;
         private boolean lastClientOnGround;
@@ -644,7 +644,6 @@ public final class NoFallCheck implements Listener {
             falling = false;
             landingPending = false;
             fallDamageSeen = false;
-            fallDamageCandidate = false;
             violationHandled = false;
             suspicionFlagged = false;
             hasPacketY = false;
