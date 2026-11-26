@@ -10,12 +10,12 @@ import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.GhostMenuCheck;
 import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.MotionCheck;
-import dev.keenac.check.NoFallCheck;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
 import dev.keenac.check.ReachCheck;
 import dev.keenac.check.ScaffoldCheck;
+import dev.keenac.check.SilentSwapCheck;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -25,6 +25,7 @@ import dev.keenac.listener.PacketBaritoneListener;
 import dev.keenac.listener.PacketInvHitListener;
 import dev.keenac.listener.PacketGhostMenuListener;
 import dev.keenac.listener.PacketReachListener;
+import dev.keenac.listener.PacketSilentSwapListener;
 import dev.keenac.listener.PlayerLifecycleListener;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -39,7 +40,7 @@ public final class KeenAC extends JavaPlugin {
     private AimCheck aimCheck;
     private ReachCheck reachCheck;
     private MotionCheck motionCheck;
-    private NoFallCheck noFallCheck;
+    private SilentSwapCheck silentSwapCheck;
     private BaritoneCheck baritoneCheck;
     private ScaffoldCheck scaffoldCheck;
     private AlertManager alertManager;
@@ -50,6 +51,7 @@ public final class KeenAC extends JavaPlugin {
     private PacketListenerAbstract reachPacketListener;
     private PacketListenerAbstract baritonePacketListener;
     private PacketListenerAbstract ghostMenuPacketListener;
+    private PacketListenerAbstract silentSwapPacketListener;
     private BukkitTask tickTask;
 
     @Override
@@ -73,16 +75,17 @@ public final class KeenAC extends JavaPlugin {
         aimCheck = new AimCheck(this);
         reachCheck = new ReachCheck(this);
         motionCheck = new MotionCheck(this);
-        noFallCheck = new NoFallCheck(this);
+        silentSwapCheck = new SilentSwapCheck(this);
         baritoneCheck = new BaritoneCheck(this);
         scaffoldCheck = new ScaffoldCheck(this);
-        packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck, noFallCheck);
+        packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
         autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck, ghostMenuCheck);
         aimPacketListener = new PacketAimListener(aimCheck);
         reachPacketListener = new PacketReachListener(reachCheck);
         baritonePacketListener = new PacketBaritoneListener(baritoneCheck);
         ghostMenuPacketListener = new PacketGhostMenuListener(ghostMenuCheck);
+        silentSwapPacketListener = new PacketSilentSwapListener(silentSwapCheck);
         PacketEvents.getAPI().getEventManager().registerListener(packetListener);
         PacketEvents.getAPI().getEventManager().registerListener(invHitPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(autoSwapPacketListener);
@@ -90,16 +93,17 @@ public final class KeenAC extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(reachPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(ghostMenuPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(silentSwapPacketListener);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(ghostMenuCheck, this);
+        Bukkit.getPluginManager().registerEvents(silentSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(new ActionBlockListener(airStuckCheck), this);
         Bukkit.getPluginManager().registerEvents(invHitCheck, this);
         Bukkit.getPluginManager().registerEvents(new PlayerLifecycleListener(airStuckCheck, alertManager), this);
         Bukkit.getPluginManager().registerEvents(aimCheck, this);
         Bukkit.getPluginManager().registerEvents(reachCheck, this);
         Bukkit.getPluginManager().registerEvents(motionCheck, this);
-        Bukkit.getPluginManager().registerEvents(noFallCheck, this);
         Bukkit.getPluginManager().registerEvents(baritoneCheck, this);
         Bukkit.getPluginManager().registerEvents(scaffoldCheck, this);
         Bukkit.getPluginManager().registerEvents(new WallHitCheck(this), this);
@@ -115,7 +119,7 @@ public final class KeenAC extends JavaPlugin {
             aimCheck.tick();
             reachCheck.tick();
             motionCheck.tick();
-            noFallCheck.tick();
+            silentSwapCheck.tick();
             ghostMenuCheck.tick();
             baritoneCheck.tick();
         }, 1L, 1L);
@@ -132,6 +136,7 @@ public final class KeenAC extends JavaPlugin {
 
     public void reloadChecks() {
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.reloadSettings();
+        if (silentSwapCheck != null) silentSwapCheck.reloadSettings();
         if (aimCheck != null) aimCheck.reloadSettings();
         if (reachCheck != null) reachCheck.reloadSettings();
     }
@@ -161,6 +166,9 @@ public final class KeenAC extends JavaPlugin {
             if (ghostMenuPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(ghostMenuPacketListener);
             }
+            if (silentSwapPacketListener != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(silentSwapPacketListener);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
@@ -169,7 +177,7 @@ public final class KeenAC extends JavaPlugin {
         if (aimCheck != null) aimCheck.clearAll();
         if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
-        if (noFallCheck != null) noFallCheck.clearAll();
+        if (silentSwapCheck != null) silentSwapCheck.clearAll();
         if (baritoneCheck != null) baritoneCheck.clearAll();
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
