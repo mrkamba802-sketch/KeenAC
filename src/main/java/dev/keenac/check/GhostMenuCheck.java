@@ -1,6 +1,5 @@
 package dev.keenac.check;
 
-import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
