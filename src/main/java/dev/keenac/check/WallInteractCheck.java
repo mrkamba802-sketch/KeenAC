@@ -10,8 +10,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -49,31 +47,6 @@ public final class WallInteractCheck implements Listener {
             event.setCancelled(true);
             report(player, "Attempted to interact with " + clicked.getType()
                     + " while Line of Sight was blocked by " + obstacle.getType() + ".");
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockBreak(BlockBreakEvent event) {
-        if (!enabled() || !cancelActions()) return;
-        Player player = event.getPlayer();
-        Block obstacle = findOccluder(player, event.getBlock());
-        if (obstacle != null) {
-            event.setCancelled(true);
-            report(player, "Attempted to break " + event.getBlock().getType()
-                    + " through " + obstacle.getType() + ".");
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockPlace(BlockPlaceEvent event) {
-        if (!enabled() || !cancelActions()) return;
-        Player player = event.getPlayer();
-        Block against = event.getBlockAgainst();
-        Block obstacle = against == null ? null : findOccluder(player, against);
-        if (obstacle != null) {
-            event.setCancelled(true);
-            report(player, "Attempted to place " + event.getBlockPlaced().getType()
-                    + " through " + obstacle.getType() + ".");
         }
     }
 
@@ -148,6 +121,11 @@ public final class WallInteractCheck implements Listener {
      * A target with even one clearly exposed hitbox sample remains interactable.
      * This avoids blocking legitimate clicks on entities partly visible around
      * the edge of a wall or doorway.
+
+     * Block breaking is intentionally not handled here: BlockBreakEvent can be
+     * delayed relative to the player's last rotation update, which makes a
+     * server-side ray aimed from the stale rotation produce false positives.
+     * Right-click block interactions are checked at PlayerInteractEvent instead.
      */
     private boolean canSeeAnyPart(Player attacker, Entity target) {
         Location eye = attacker.getEyeLocation();
