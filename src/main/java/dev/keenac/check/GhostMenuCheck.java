@@ -129,7 +129,14 @@ public final class GhostMenuCheck implements Listener {
         double dz = event.getTo().getZ() - event.getFrom().getZ();
         double horizontalDistance = Math.hypot(dx, dz);
         if (horizontalDistance < 0.035) {
-            return; // Ignore look-only packets without breaking a continuous run sample.
+            // Look-only movement packets are not walking samples, but advance the
+            // timing baseline so the next actual step is measured over one interval.
+            if (state.lastMovementNanos > 0L
+                    && now - state.lastMovementNanos > MAX_MOVEMENT_GAP_NANOS) {
+                state.resetMovementWindow();
+            }
+            state.lastMovementNanos = now;
+            return;
         }
 
         long elapsed = state.lastMovementNanos == 0L ? 0L : now - state.lastMovementNanos;
