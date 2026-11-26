@@ -233,7 +233,8 @@ public final class AimCheck implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Player player = Bukkit.getPlayer(attackerId);
                 if (player != null && player.isOnline()) {
-                    plugin.getAlertManager().send("Aim", player, vl);
+                    plugin.getAlertManager().send("Aim", player, vl,
+                            "Repeated highly accurate attacks were recorded against moving targets.");
                 }
             });
         }
