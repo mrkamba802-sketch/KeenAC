@@ -19,6 +19,16 @@ checks:
     # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
     pearl-grace-ticks: 200
 
+  aura:
+    enabled: true
+    # Repeated attacks from clearly off-angle directions are reviewed.
+    max-angle-degrees: 110.0
+    required-hits: 3
+    window-ms: 1500
+    flag-duration-ms: 900
+    alert-cooldown-ms: 5000
+    max-distance: 5.0
+
   wall-hit:
     enabled: true
     # Cancel attacks when the target cannot be seen through blocks.
