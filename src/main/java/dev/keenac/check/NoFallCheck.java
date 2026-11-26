@@ -3,6 +3,9 @@ package dev.keenac.check;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.damage.DamageType;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -469,17 +472,28 @@ public final class NoFallCheck implements Listener {
         return applied;
     }
 
-    /** Vanilla fall formula: ceil(distance - 3), applied once after confirmed suppression. */
+    /**
+     * Reapply the server's fall damage type once after a confirmed suppression.
+     * The safe-fall and damage-multiplier attributes are used before dispatching
+     * a genuine FALL damage source, preserving normal protection/enchantment handling.
+     */
     private double applyFallDamage(Player player, double fallDistance) {
         if (!damageEnabled || !plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true)
                 || player.isDead() || !Double.isFinite(fallDistance)) {
             return 0.0;
         }
-        double damage = Math.ceil(Math.max(0.0, fallDistance - 3.0));
+
+        var safeFallAttribute = player.getAttribute(Attribute.SAFE_FALL_DISTANCE);
+        var multiplierAttribute = player.getAttribute(Attribute.FALL_DAMAGE_MULTIPLIER);
+        double safeFallDistance = safeFallAttribute == null ? 3.0 : safeFallAttribute.getValue();
+        double damageMultiplier = multiplierAttribute == null ? 1.0 : multiplierAttribute.getValue();
+        double damage = Math.ceil(Math.max(0.0, fallDistance - safeFallDistance)
+                * Math.max(0.0, damageMultiplier));
         if (damage <= 0.0) {
             return 0.0;
         }
-        player.damage(damage);
+
+        player.damage(damage, DamageSource.builder(DamageType.FALL).build());
         return damage;
     }
 
