@@ -36,11 +36,11 @@ checks:
 
   wall-interact:
     enabled: true
-    # Soft mode: only checks farther block interactions to reduce false positives.
-    cancel-actions: true
-    # Minimum target distance for block Line of Sight checks.
-    min-check-distance: 4.5
-    # Ray-trace range used when checking whether an interacted block is occluded.
+    # Advisory mode by default: report suspected wall interactions without cancelling them.
+    cancel-actions: false
+    # Only review long-range block interactions to avoid normal close-range clicks.
+    min-check-distance: 5.5
+    # Maximum range for block/entity Line of Sight review.
     max-distance: 7.0
 
   no-slow:
