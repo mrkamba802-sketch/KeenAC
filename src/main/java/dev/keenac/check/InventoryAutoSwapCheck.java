@@ -25,7 +25,6 @@ public final class InventoryAutoSwapCheck implements Listener {
     private volatile boolean enabled;
     private volatile int requiredSwaps;
     private volatile long windowNanos;
-    private volatile long alertCooldownNanos;
 
     public InventoryAutoSwapCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -39,9 +38,6 @@ public final class InventoryAutoSwapCheck implements Listener {
                 plugin.getConfig().getInt("checks.auto-swap.required-swaps", 8));
         windowNanos = Math.max(250L,
                 plugin.getConfig().getLong("checks.auto-swap.window-ms", 1500L))
-                * 1_000_000L;
-        alertCooldownNanos = Math.max(1000L,
-                plugin.getConfig().getLong("checks.auto-swap.alert-cooldown-ms", 5000L))
                 * 1_000_000L;
     }
 
@@ -81,13 +77,11 @@ public final class InventoryAutoSwapCheck implements Listener {
             }
             state.samples.addLast(now);
 
-            if (state.samples.size() < requiredSwaps
-                    || now - state.lastAlertNanos < alertCooldownNanos) {
+            if (state.samples.size() < requiredSwaps) {
                 return;
             }
 
             state.samples.clear();
-            state.lastAlertNanos = now;
             violationLevel = ++state.violationLevel;
         }
 
@@ -118,7 +112,6 @@ public final class InventoryAutoSwapCheck implements Listener {
 
     private static final class SwapState {
         private final Deque<Long> samples = new ArrayDeque<>();
-        private long lastAlertNanos;
         private int violationLevel;
     }
 }
