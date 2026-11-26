@@ -2,6 +2,16 @@
 # All distances are measured in blocks; time values are in seconds or server ticks as noted.
 
 checks:
+  # Shared server-authoritative correction used by Motion and NoSlow.
+  movement-setback:
+    enabled: true
+    # Preserve fractional coordinates and add a tiny offset against attempted movement.
+    micro-offset: 0.002
+    # Briefly reject movement/velocity immediately after a rubberband (milliseconds).
+    correction-lock-ms: 120
+    # Collapse simultaneous flags from multiple movement checks.
+    dedupe-ms: 80
+
   air-stuck:
     enabled: true
     # Faster confirmation while still requiring stable ping and downward velocity.
@@ -46,6 +56,12 @@ checks:
     enabled: true
     # Consecutive suspicious movement samples required before an alert.
     required-samples: 5
+    setback:
+      enabled: true
+      # Permit a few small steps; confirm after at least this many samples and
+      # the configured cumulative suspicious displacement (0.10-0.30 blocks).
+      minimum-samples: 2
+      threshold-distance: 0.18
     # Cancel item consumption after a confirmed violation.
     cancel-consume: true
     # Allow NoSlow to interrupt food use after a confirmed violation.
@@ -137,14 +153,12 @@ checks:
       vertical-tolerance: 0.015
       velocity-tolerance: 0.035
       confirm-ticks: 12
-    # On a confirmed Motion violation, return to the latest recent jump origin
-    # and freeze all positional movement for the configured duration.
+    # On a confirmed Motion violation, rubberband to the latest valid jump/ground point.
+    # The shared movement-setback settings add the millimetre offset and short correction lock.
     setback:
       enabled: true
       # Only use a jump origin saved recently (milliseconds).
       jump-origin-max-age-ms: 3000
-      # Extended hard positional freeze after the rollback (milliseconds).
-      freeze-duration-ms: 3500
       # Maximum age of the last grounded rollback point when no recent jump exists.
       safe-position-max-age-ms: 15000
     # PacketEvents horizontal movement analysis against the estimated vanilla speed.
