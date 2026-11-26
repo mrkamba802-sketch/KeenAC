@@ -60,7 +60,7 @@ public final class NoFallCheck implements Listener {
         maxPing = Math.max(50, plugin.getConfig().getInt("checks.no-fall.max-ping-ms", 250));
         minimumFallDistance = Math.max(2.0,
                 plugin.getConfig().getDouble("checks.no-fall.minimum-fall-distance", 3.0));
-        requiredPackets = Math.max(1,
+        requiredPackets = Math.max(2,
                 plugin.getConfig().getInt("checks.no-fall.required-packets", 2));
         packetWindowNanos = Math.max(250L,
                 plugin.getConfig().getLong("checks.no-fall.packet-window-ms", 750L)) * 1_000_000L;
@@ -70,6 +70,13 @@ public final class NoFallCheck implements Listener {
         safePositionMaxAgeMillis = Math.max(1000L,
                 plugin.getConfig().getLong("checks.no-fall.setback.safe-position-max-age-ms", 30000L));
         damageEnabled = plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true);
+
+        if (!enabled) {
+            // Do not retain pending suspicions across a disabled/re-enabled check.
+            profiles.clear();
+            packetStates.clear();
+            return;
+        }
 
         var online = Bukkit.getOnlinePlayers().stream()
                 .map(Player::getUniqueId)
