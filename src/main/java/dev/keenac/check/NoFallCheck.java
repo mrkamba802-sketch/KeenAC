@@ -599,7 +599,6 @@ public final class NoFallCheck implements Listener {
             landingPending = false;
             fallDamageSeen = false;
             violationHandled = false;
-            suspicionFlagged = false;
             hasPacketY = false;
             totalClientGroundClaims = 0;
             world = null;
