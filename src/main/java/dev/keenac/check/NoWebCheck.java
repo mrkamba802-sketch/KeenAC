@@ -202,7 +202,7 @@ public final class NoWebCheck implements Listener {
             if (!fromInWeb && !toInWeb) {
                 if (state == null || state.violationLevel == 0) states.remove(id);
             } else if (toInWeb) {
-                if (state == null) state = new PlayerState(to);
+                if (state == null) state = new PlayerState(to, now);
                 state.lastSafe = to.clone();
                 states.put(id, state);
             } else {
@@ -220,7 +220,7 @@ public final class NoWebCheck implements Listener {
         }
 
         if (state == null) {
-            state = new PlayerState(from);
+            state = new PlayerState(from, now);
             states.put(id, state);
         }
 
@@ -358,7 +358,7 @@ public final class NoWebCheck implements Listener {
     private double getAllowedMoveDistance(Player player, PlayerState state, long now, Location movementLocation) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
-        double configuredPerTick = Math.max(0.01, Math.min(0.060,
+        double configuredPerTick = Math.max(0.01, Math.min(0.030,
                 plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.055)));
         double bufferPerTick = Math.max(0.0, Math.min(0.010,
                 plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.003)));
@@ -419,8 +419,12 @@ public final class NoWebCheck implements Listener {
             elapsedTicks = Math.max(0.5, Math.min(4.0, elapsed));
         }
 
+        // Scale the tolerance with stance too; otherwise blocking/sneaking
+        // would inherit the full standing-player packet buffer.
+        double stanceBufferMultiplier = Math.max(0.20, stanceMultiplier);
         return (configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
-                * webMultiplier * iceMultiplier + bufferPerTick) * elapsedTicks;
+                * webMultiplier * iceMultiplier
+                + bufferPerTick * stanceBufferMultiplier) * elapsedTicks;
     }
 
     private void returnToAnchor(Player player, Location requested, PlayerState state) {
@@ -519,9 +523,9 @@ public final class NoWebCheck implements Listener {
         private int normalMovementSamples;
         private boolean locked;
 
-        private PlayerState(Location initialLocation) {
+        private PlayerState(Location initialLocation, long initialMovementNanos) {
             this.lastSafe = initialLocation.clone();
-            this.lastMovementNanos = System.nanoTime();
+            this.lastMovementNanos = initialMovementNanos;
         }
     }
 }
