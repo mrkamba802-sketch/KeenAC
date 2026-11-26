@@ -103,6 +103,7 @@ public final class NoFallCheck implements Listener {
                     safeSurface,
                     player.getPing(),
                     player.getFallDistance(),
+                    location.getY(),
                     location.getWorld(),
                     copyLocation(lastSafePositions.get(id)),
                     lastSafePositionAt.getOrDefault(id, 0L)));
@@ -147,74 +148,100 @@ public final class NoFallCheck implements Listener {
                 if (!state.hasPacketY) {
                     double safeY = profile.lastSafePosition != null
                             && profile.lastSafePosition.getWorld() == profile.world
-                            ? profile.lastSafePosition.getY() : packetY;
-                    state.peakPacketY = Math.max(packetY, safeY);
+                            ? profile.lastSafePosition.getY() : profile.currentY;
+                    state.peakPacketY = Math.max(Math.max(packetY, safeY), profile.currentY);
                     state.lastPacketY = packetY;
                     state.hasPacketY = true;
                 } else {
-                    state.peakPacketY = Math.max(state.peakPacketY, packetY);
+                    state.peakPacketY = Math.max(
+                            Math.max(state.peakPacketY, packetY), profile.currentY);
                     state.lastPacketY = packetY;
                 }
+            } else if (state.hasPacketY) {
+                state.peakPacketY = Math.max(state.peakPacketY, profile.currentY);
+                state.lastPacketY = Math.min(state.lastPacketY, profile.currentY);
             }
 
             state.lastPacketNanos = now;
             state.lastClientOnGround = clientOnGround;
 
-            // A physically supported player has landed. This is the only normal
-            // re-arm point for the next fall, and it must never receive NoFall damage.
-            if (profile.physicallySupported && clientOnGround) {
+            // A grounded packet after a long descent is reviewed instead of being
+            // discarded immediately. A genuine landing generates a FALL event;
+            // a NoFall spoof commonly suppresses that event while asserting onGround.
+            if (profile.physicallySupported && !clientOnGround) {
                 state.resetForGround();
                 return;
             }
-
-            // When the client stops claiming onGround, immediately cancel any
-            // pending confirmation. This prevents delayed alerts/damage after
-            // the player has disabled the modification.
-            if (!clientOnGround) {
-                state.resetCandidateOnly();
-                state.confirmationPending = false;
-                return;
-            }
-
-            // Do not punish a claim while the player is on a real damage-exempt
-            // block or during a fall episode already handled.
-            if (state.violationHandled || state.confirmationPending) {
-                return;
-            }
-
-            double packetFallDistance = state.hasPacketY
-                    ? Math.max(0.0, state.peakPacketY - state.lastPacketY) : 0.0;
-            double observedFallDistance = Math.max(profile.fallDistance, packetFallDistance);
-            if (observedFallDistance <= minimumFallDistance) {
-                state.resetCandidateOnly();
-                return;
-            }
-
-            if (state.firstClaimNanos == 0L
-                    || now - state.firstClaimNanos > packetWindowNanos) {
+            if (profile.physicallySupported && clientOnGround) {
+                if (state.confirmationPending) {
+                    return;
+                }
+                if (state.violationHandled) {
+                    state.resetForGround();
+                    return;
+                }
+                double landingDistance = observedFallDistance(profile, state);
+                if (landingDistance <= minimumFallDistance) {
+                    state.resetForGround();
+                    return;
+                }
                 state.resetCandidateOnly();
                 state.firstClaimNanos = now;
-                state.candidateFallDistance = observedFallDistance;
+                state.candidateFallDistance = landingDistance;
                 state.suspectedAtNanos = now;
                 state.candidateSafePosition = copyLocation(profile.lastSafePosition);
                 state.candidateSafePositionAt = profile.lastSafePositionAt;
-                state.claims = 1;
-            } else {
-                state.candidateFallDistance = Math.max(
-                        state.candidateFallDistance, observedFallDistance);
-                state.claims++;
-            }
-
-            // Never use a single packet as sufficient proof. Repeated ground
-            // claims during a fall are needed, while actual support was excluded above.
-            if (state.claims >= requiredPackets) {
+                state.claims = requiredPackets;
                 state.confirmationPending = true;
                 episodeId = state.episodeId;
-                candidateDistance = state.candidateFallDistance;
-                suspectedAtNanos = state.suspectedAtNanos;
-                candidateSafePosition = copyLocation(state.candidateSafePosition);
-                candidateSafePositionAt = state.candidateSafePositionAt;
+                candidateDistance = landingDistance;
+                suspectedAtNanos = now;
+                candidateSafePosition = copyLocation(profile.lastSafePosition);
+                candidateSafePositionAt = profile.lastSafePositionAt;
                 shouldSchedule = true;
+            } else if (!clientOnGround) {
+                // Cancel delayed punishment as soon as the client stops spoofing,
+                // but keep the tracked vertical trajectory for this fall.
+                state.resetCandidateOnly();
+                state.confirmationPending = false;
+                return;
+            } else {
+                // Require repeated onGround packets while the independent server
+                // collision check says the player is airborne.
+                if (state.violationHandled || state.confirmationPending) {
+                    return;
+                }
+
+                double observedFallDistance = observedFallDistance(profile, state);
+                if (observedFallDistance <= minimumFallDistance) {
+                    state.resetCandidateOnly();
+                    return;
+                }
+
+                if (state.firstClaimNanos == 0L
+                        || now - state.firstClaimNanos > packetWindowNanos) {
+                    state.resetCandidateOnly();
+                    state.firstClaimNanos = now;
+                    state.candidateFallDistance = observedFallDistance;
+                    state.suspectedAtNanos = now;
+                    state.candidateSafePosition = copyLocation(profile.lastSafePosition);
+                    state.candidateSafePositionAt = profile.lastSafePositionAt;
+                    state.claims = 1;
+                } else {
+                    state.candidateFallDistance = Math.max(
+                            state.candidateFallDistance, observedFallDistance);
+                    state.claims++;
+                }
+
+                if (state.claims >= requiredPackets) {
+                    state.confirmationPending = true;
+                    episodeId = state.episodeId;
+                    candidateDistance = state.candidateFallDistance;
+                    suspectedAtNanos = state.suspectedAtNanos;
+                    candidateSafePosition = copyLocation(state.candidateSafePosition);
+                    candidateSafePositionAt = state.candidateSafePositionAt;
+                    shouldSchedule = true;
+                }
             }
         }
 
@@ -263,17 +290,6 @@ public final class NoFallCheck implements Listener {
             }
         }
 
-        // A fresh server-side collision test is authoritative for ordinary
-        // landings. Never add damage once the player has real block support.
-        if (hasSolidSupport(player)) {
-            synchronized (state) {
-                if (state.episodeId == episodeId) {
-                    state.resetForGround();
-                }
-            }
-            return;
-        }
-
         long now = System.nanoTime();
         long vanillaFallDamageAt = lastFallDamageNanos.getOrDefault(id, 0L);
         if (vanillaFallDamageAt >= suspectedAtNanos - 100_000_000L
@@ -289,11 +305,20 @@ public final class NoFallCheck implements Listener {
         }
 
         int vl;
+        double confirmedFallDistance;
         synchronized (state) {
             if (state.episodeId != episodeId || !state.confirmationPending
                     || !state.lastClientOnGround || state.violationHandled) {
                 return;
             }
+            double currentY = player.getLocation().getY();
+            double packetDrop = state.hasPacketY
+                    ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, currentY))
+                    : 0.0;
+            double anchoredDrop = safePosition != null && safePosition.getWorld() == player.getWorld()
+                    ? Math.max(0.0, safePosition.getY() - currentY) : 0.0;
+            confirmedFallDistance = Math.max(fallDistance,
+                    Math.max(player.getFallDistance(), Math.max(packetDrop, anchoredDrop)));
             state.confirmationPending = false;
             state.violationHandled = true;
             state.resetCandidateOnly();
@@ -302,8 +327,8 @@ public final class NoFallCheck implements Listener {
         }
 
         boolean setbackApplied = applySetback(player, safePosition, safePositionAtMillis);
-        // Manual fall damage is applied exactly once for this confirmed episode.
-        double appliedDamage = applyFallDamage(player, fallDistance);
+        // Damage scales with the full measured drop (vanilla formula: ceil(height - 3)).
+        double appliedDamage = applyFallDamage(player, confirmedFallDistance);
 
         if (now - state.lastAlertNanos >= alertCooldownNanos) {
             state.lastAlertNanos = now;
@@ -312,8 +337,18 @@ public final class NoFallCheck implements Listener {
         if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
                     "NoFall confirmed for %s (VL=%d, fallDistance=%.2f, setback=%s, damage=%.1f)",
-                    player.getName(), vl, fallDistance, setbackApplied, appliedDamage));
+                    player.getName(), vl, confirmedFallDistance, setbackApplied, appliedDamage));
         }
+    }
+
+    private double observedFallDistance(NoFallProfile profile, PacketState state) {
+        double anchoredDrop = profile.lastSafePosition != null
+                && profile.lastSafePosition.getWorld() == profile.world
+                ? Math.max(0.0, profile.lastSafePosition.getY() - profile.currentY) : 0.0;
+        double packetDrop = state.hasPacketY
+                ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, profile.currentY))
+                : 0.0;
+        return Math.max(profile.fallDistance, Math.max(anchoredDrop, packetDrop));
     }
 
     private void cancelPending(PacketState state, long episodeId) {
@@ -367,6 +402,9 @@ public final class NoFallCheck implements Listener {
     private double applyFallDamage(Player player, double fallDistance) {
         if (!damageEnabled || !plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true)
                 || player.isDead()) {
+            return 0.0;
+        }
+        if (!Double.isFinite(fallDistance)) {
             return 0.0;
         }
         double damage = Math.ceil(Math.max(0.0, fallDistance - 3.0));
@@ -514,6 +552,7 @@ public final class NoFallCheck implements Listener {
             boolean safeSurface,
             int ping,
             double fallDistance,
+            double currentY,
             org.bukkit.World world,
             Location lastSafePosition,
             long lastSafePositionAt) { }
