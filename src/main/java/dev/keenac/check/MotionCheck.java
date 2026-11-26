@@ -1018,6 +1018,9 @@ public final class MotionCheck implements Listener {
                 // zeros velocity and briefly rejects further positional deltas.
                 lastJumpOrigin.remove(id);
                 lastJumpAt.remove(id);
+                lastSafePosition.put(id, online.getLocation().clone());
+                lastSafeAt.put(id, System.currentTimeMillis());
+                plugin.getMovementSetbackManager().recordValidPosition(online, online.getLocation());
                 motionPacketStates.remove(id);
                 samplePositions.remove(id);
             } else {
