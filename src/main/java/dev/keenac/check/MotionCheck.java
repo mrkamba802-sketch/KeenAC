@@ -391,7 +391,7 @@ public final class MotionCheck implements Listener {
         motionPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
         motionPacketCooldownNanos = Math.max(200L,
-                plugin.getConfig().getLong("checks.motion.packet-alert-cooldown-ms", 400L))
+                plugin.getConfig().getLong("checks.motion.packet-signal-interval-ms", 400L))
                 * 1_000_000L;
         int hoverTicks = Math.max(8,
                 plugin.getConfig().getInt("checks.motion.hover.confirm-ticks", 12));
@@ -699,8 +699,10 @@ public final class MotionCheck implements Listener {
             return;
         }
 
-        long reviewWindow = Math.max(1L,
-                plugin.getConfig().getLong("checks.motion.review-window-ms", 3000L));
+        // Re-review cadence follows the same configured real-time delay as
+        // AlertManager, rather than a separate check-local alert cooldown.
+        long reviewWindow = Math.max(0L,
+                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
         long activeUntil = reviewUntil.getOrDefault(id, 0L);
         if (now < activeUntil) {
             return;
