@@ -49,17 +49,16 @@ checks:
     open-grace-ms: 1200
     # Recheck movement after velocity changes or damage to avoid knockback false positives.
     velocity-grace-ms: 1000
-    # High packet-measured horizontal speed is the primary signal.
-    # Sprint state is not required because some clients report it inconsistently while a GUI is open.
+    # Require sustained movement faster than an ordinary walk.
+    # The server can reliably confirm container GUIs, but not the open/closed
+    # state of the client-side E inventory from a window-0 click alone.
     require-sprint: false
-    minimum-horizontal-speed: 1.8
+    minimum-horizontal-speed: 2.5
     required-samples: 4
     required-duration-ms: 250
     required-distance: 0.65
     sample-window-ms: 1200
     max-ping-ms: 250
-    # The E-inventory is client-side; detection is best-effort after window-0 clicks.
-    personal-inventory-window-ms: 2200
     # Watch movement briefly after x3 closes the GUI; continued movement becomes x4.
     post-close-watch-ms: 1500
     # Escalation freeze after x4 and subsequent movement attempts.
