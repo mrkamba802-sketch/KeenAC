@@ -10,14 +10,17 @@ import org.bukkit.entity.Player;
 
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class AlertManager {
     private static final String CHECK_MARKER = "\u0001KEENAC_CHECK\u0001";
 
     private final KeenAC plugin;
     private final Set<UUID> enabled = new HashSet<>();
+    private final Map<AlertKey, Integer> alertLevels = new ConcurrentHashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
 
     public AlertManager(KeenAC plugin) {
@@ -50,6 +53,13 @@ public final class AlertManager {
     public void send(String checkName, Player suspect, int violationLevel, String reason) {
         if (!plugin.getConfig().getBoolean("alerts.enabled", true)) return;
 
+        // Display the count of alerts actually emitted for this player/check.
+        // Check-local counters may decay or advance while a cooldown suppresses
+        // delivery, so they must not control the visible xN sequence.
+        AlertKey key = new AlertKey(suspect.getUniqueId(), checkName);
+        int alertLevel = alertLevels.merge(key, 1, (current, one) ->
+                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+
         String prefix = plugin.getConfig().getString("alerts.prefix", "&bKeenAC &8»");
         String format = plugin.getConfig().getString(
                 "alerts.format", "{prefix} &f{player} &7failed &c{check} &8(x{vl})");
@@ -65,7 +75,7 @@ public final class AlertManager {
                 .replace("{prefix}", prefix)
                 .replace("{player}", suspect.getName())
                 .replace("{check}", CHECK_MARKER)
-                .replace("{vl}", Integer.toString(violationLevel))
+                .replace("{vl}", Integer.toString(alertLevel))
                 .replace("{reason}", safeReason)
                 .replace("{ping}", Integer.toString(ping))
                 .replace("{tps}", tpsText);
@@ -89,7 +99,7 @@ public final class AlertManager {
                             + "\n&bПричина: &f" + safeReason
                             + "\n&bПинг: &f" + ping + " ms"
                             + "\n&bTPS: &f" + tpsText
-                            + "\n&bУровень: &fх" + violationLevel);
+                            + "\n&bУровень: &fх" + alertLevel);
             Component check = legacy.deserialize("&c" + checkName)
                     .hoverEvent(HoverEvent.showText(details));
             message = legacy.deserialize(before)
@@ -107,6 +117,16 @@ public final class AlertManager {
         }
     }
 
-    public void clear(Player player) { enabled.remove(player.getUniqueId()); }
-    public void clearAll() { enabled.clear(); }
+    public void clear(Player player) {
+        UUID id = player.getUniqueId();
+        enabled.remove(id);
+        alertLevels.keySet().removeIf(key -> key.playerId().equals(id));
+    }
+
+    public void clearAll() {
+        enabled.clear();
+        alertLevels.clear();
+    }
+
+    private record AlertKey(UUID playerId, String checkName) { }
 }
