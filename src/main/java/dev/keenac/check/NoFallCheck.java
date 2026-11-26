@@ -111,7 +111,8 @@ public final class NoFallCheck implements Listener {
      * packets. A candidate is only alerted if the server has not actually
      * landed the player and the location is not a fall-damage-exempt surface.
      */
-    public void recordPacketOnGround(UUID id, boolean clientOnGround) {
+    public void recordPacketOnGround(UUID id, boolean clientOnGround,
+                                     boolean hasPosition, double packetY) {
         NoFallProfile profile = profiles.get(id);
         if (!enabled || profile == null || !profile.eligible || profile.ping > maxPing) {
             packetStates.remove(id);
@@ -120,43 +121,69 @@ public final class NoFallCheck implements Listener {
 
         long now = System.nanoTime();
         PacketState state = packetStates.computeIfAbsent(id, ignored -> new PacketState());
-        if (!clientOnGround || profile.safeSurface) {
-            synchronized (state) {
-                state.reset();
-            }
-            return;
-        }
-
-        boolean candidateFall = !profile.serverOnGround
-                && profile.fallDistance > minimumFallDistance;
         boolean shouldConfirm = false;
         double candidateDistance = 0.0;
         long suspectedAtNanos = 0L;
         Location candidateSafePosition = null;
         long candidateSafePositionAt = 0L;
+
         synchronized (state) {
-            if (state.firstClaimNanos == 0L || now - state.firstClaimNanos > packetWindowNanos) {
+            // A server-confirmed landing or a damage-exempt surface ends the
+            // current descent. The tracked packet height is kept only in air.
+            if (profile.serverOnGround || profile.safeSurface) {
                 state.reset();
-                if (candidateFall) {
-                    state.firstClaimNanos = now;
-                    state.candidateFallDistance = profile.fallDistance;
-                    state.suspectedAtNanos = now;
-                    state.candidateSafePosition = copyLocation(profile.lastSafePosition);
-                    state.candidateSafePositionAt = profile.lastSafePositionAt;
-                    state.claims = 1;
+                return;
+            }
+
+            if (hasPosition && Double.isFinite(packetY)) {
+                if (!state.hasPacketY) {
+                    double safeY = profile.lastSafePosition != null
+                            && profile.lastSafePosition.getWorld() == profile.world
+                            ? profile.lastSafePosition.getY() : packetY;
+                    state.peakPacketY = Math.max(packetY, safeY);
+                    state.lastPacketY = packetY;
+                    state.hasPacketY = true;
+                } else {
+                    // Keep the highest observed client position during this
+                    // airborne interval, so a spoofed ground bit cannot erase
+                    // the fall distance when Bukkit resets Player#getFallDistance().
+                    state.peakPacketY = Math.max(state.peakPacketY, state.lastPacketY);
+                    state.peakPacketY = Math.max(state.peakPacketY, packetY);
+                    state.lastPacketY = packetY;
                 }
+            }
+
+            if (!clientOnGround) {
+                state.resetCandidateOnly();
+                return;
+            }
+
+            double packetFallDistance = state.hasPacketY
+                    ? Math.max(0.0, state.peakPacketY - state.lastPacketY) : 0.0;
+            double observedFallDistance = Math.max(profile.fallDistance, packetFallDistance);
+            boolean candidateFall = observedFallDistance > minimumFallDistance;
+            if (!candidateFall) {
+                state.resetCandidateOnly();
+                return;
+            }
+
+            if (state.firstClaimNanos == 0L
+                    || now - state.firstClaimNanos > packetWindowNanos) {
+                state.resetCandidateOnly();
+                state.firstClaimNanos = now;
+                state.candidateFallDistance = observedFallDistance;
+                state.suspectedAtNanos = now;
+                state.candidateSafePosition = copyLocation(profile.lastSafePosition);
+                state.candidateSafePositionAt = profile.lastSafePositionAt;
+                state.claims = 1;
             } else {
-                // Keep the original fall-distance evidence if the server clears
-                // it after processing a spoofed onGround bit.
-                if (candidateFall) {
-                    state.candidateFallDistance = Math.max(
-                            state.candidateFallDistance, profile.fallDistance);
-                }
+                state.candidateFallDistance = Math.max(
+                        state.candidateFallDistance, observedFallDistance);
                 state.claims++;
             }
 
             if (state.claims >= requiredPackets
-                    && state.candidateFallDistance >= minimumFallDistance
+                    && state.candidateFallDistance > minimumFallDistance
                     && now - state.lastAlertNanos >= alertCooldownNanos) {
                 state.lastAlertNanos = now;
                 candidateDistance = state.candidateFallDistance;
@@ -374,14 +401,15 @@ public final class NoFallCheck implements Listener {
         private Location candidateSafePosition;
         private long candidateSafePositionAt;
         private int claims;
+        private boolean hasPacketY;
+        private double lastPacketY;
+        private double peakPacketY;
 
         private void reset() {
-            firstClaimNanos = 0L;
-            candidateFallDistance = 0.0;
-            suspectedAtNanos = 0L;
-            candidateSafePosition = null;
-            candidateSafePositionAt = 0L;
-            claims = 0;
+            resetCandidateOnly();
+            hasPacketY = false;
+            lastPacketY = 0.0;
+            peakPacketY = 0.0;
         }
 
         private void resetCandidateOnly() {
