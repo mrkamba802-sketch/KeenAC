@@ -390,9 +390,9 @@ public final class MotionCheck implements Listener {
         // Keep only a small margin above the estimated vanilla speed. Packet
         // samples are averaged over a window, so large legacy buffers are unsafe.
         motionSpeedMultiplier = Math.max(1.0,
-                Math.min(1.06, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.025)));
+                Math.min(1.04, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.025)));
         motionSpeedBufferBps = Math.max(0.0,
-                Math.min(0.10, plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.04)));
+                Math.min(0.06, plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.04)));
         motionSpeedConfirmSamples = Math.max(2,
                 plugin.getConfig().getInt("checks.motion.speed.confirm-samples", 3));
         int sampleWindowMs = Math.max(350,
