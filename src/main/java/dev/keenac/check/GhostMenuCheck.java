@@ -203,8 +203,11 @@ public final class GhostMenuCheck implements Listener {
                         sample.y, sample.atNanos);
                 if (state.source == MenuSource.CONTAINER
                         && verticalDisplacement >= HIGH_JUMP_DISTANCE) {
-                    boolean closed = reportViolation(player, sample.atNanos, state,
-                            Math.abs(dy) / (elapsed / 1_000_000_000.0));
+                    boolean closed = reportViolation(player, state,
+                            Math.abs(dy) / (elapsed / 1_000_000_000.0),
+                            String.format(java.util.Locale.ROOT,
+                                    "Vertical displacement of %.2f blocks while a server-side menu was open.",
+                                    verticalDisplacement));
                     state.resetMovementWindow();
                     state.resetVerticalWindow(sample.y, sample.atNanos);
                     if (closed) {
@@ -243,7 +246,10 @@ public final class GhostMenuCheck implements Listener {
                 if (state.samples >= requiredSamples()
                         && sample.atNanos - state.sampleStartedNanos >= requiredDurationNanos()
                         && state.distance >= requiredDistance()) {
-                    boolean closed = reportViolation(player, sample.atNanos, state, speed);
+                    boolean closed = reportViolation(player, state, speed,
+                            String.format(java.util.Locale.ROOT,
+                                    "Sustained horizontal movement at %.2f blocks/sec over %.2f blocks while a server-side menu was open.",
+                                    speed, state.distance));
                     state.resetMovementWindow();
                     if (closed) {
                         queue.clear();
@@ -345,14 +351,14 @@ public final class GhostMenuCheck implements Listener {
                 || below == Material.SOUL_SAND || below == Material.SOUL_SOIL;
     }
 
-    private boolean reportViolation(Player player, long now, MenuState state, double speed) {
+    private boolean reportViolation(Player player, MenuState state, double speed,
+                                     String reason) {
         UUID id = player.getUniqueId();
         int level = violationLevels.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
 
         // No per-check cooldown: staff see each escalation as x1, x2, x3...
-        plugin.getAlertManager().send("GhostMenu", player, level,
-                "Player moved abnormally while a server-side menu was open.");
+        plugin.getAlertManager().send("GhostMenu", player, level, reason);
         if (plugin.getConfig().getBoolean("checks.ghost-menu.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
                     "GhostMenu suspicion for %s (VL=%d, menu=%s, speed=%.2f, distance=%.3f, samples=%d)",
@@ -365,8 +371,8 @@ public final class GhostMenuCheck implements Listener {
                 applySetback(player, state);
             }
         }
-        // GhostMenu uses a NoWeb-style setback only. Do not freeze the player:
-        // movement after the GUI has closed must remain ordinary movement.
+        // GhostMenu uses a short NoWeb-style setback only; ordinary movement
+        // remains available immediately after the GUI closes.
         return level >= 3;
     }
 
