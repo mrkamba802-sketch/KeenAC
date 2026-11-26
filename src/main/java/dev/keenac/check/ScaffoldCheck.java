@@ -106,7 +106,9 @@ public final class ScaffoldCheck implements Listener {
             state.vl++;
             int vl = state.vl;
             int streak = state.streak;
-            plugin.getAlertManager().send("Scaffold", player, vl);
+            plugin.getAlertManager().send("Scaffold", player, vl,
+                    "Repeated block placements formed a scaffold-like pattern (" + streak
+                            + " consecutive contextual samples).");
             plugin.getLogger().warning("Scaffold placement review for " + player.getName()
                     + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
         }
