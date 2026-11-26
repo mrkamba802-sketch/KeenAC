@@ -132,8 +132,33 @@ public final class MotionCheck implements Listener {
             return;
         }
         UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        // Do not move the rollback anchor forward while Motion evidence is
+        // accumulating or a setback is waiting to run.
+        if (pendingSetbacks.contains(id)
+                || reviewUntil.getOrDefault(id, 0L) > now
+                || hasRecentMotionEvidence(id, now)) {
+            return;
+        }
         lastSafePosition.put(id, player.getLocation().clone());
-        lastSafeAt.put(id, System.currentTimeMillis());
+        lastSafeAt.put(id, now);
+    }
+
+    private boolean hasRecentMotionEvidence(UUID id, long now) {
+        Deque<Long> samples = suspicionTimes.get(id);
+        if (samples == null) {
+            return false;
+        }
+        long window = Math.max(1L,
+                plugin.getConfig().getLong("checks.motion.suspicion-window-ms", 3000L));
+        while (!samples.isEmpty() && now - samples.peekFirst() > window) {
+            samples.removeFirst();
+        }
+        if (samples.isEmpty()) {
+            suspicionTimes.remove(id);
+            return false;
+        }
+        return true;
     }
 
     /**
