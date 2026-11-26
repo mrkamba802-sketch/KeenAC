@@ -385,10 +385,12 @@ public final class MotionCheck implements Listener {
      * consume this immutable profile and never query Bukkit world/player state.
      */
     private void refreshMotionPacketSettings() {
+        // Clamp legacy config values too: an older config.yml may still carry
+        // the previous, much more permissive 1.30 / 0.55 defaults.
         motionSpeedMultiplier = Math.max(1.0,
-                Math.min(2.0, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.06)));
+                Math.min(1.08, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.06)));
         motionSpeedBufferBps = Math.max(0.0,
-                plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.12));
+                Math.min(0.15, plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.12)));
         motionSpeedConfirmSamples = Math.max(2,
                 plugin.getConfig().getInt("checks.motion.speed.confirm-samples", 3));
         int sampleWindowMs = Math.max(350,
@@ -447,6 +449,9 @@ public final class MotionCheck implements Listener {
         double movementMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
         double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
         double stanceMultiplier = player.isSneaking() ? 0.30 : 1.0;
+        if (player.isBlocking()) {
+            stanceMultiplier *= 0.20;
+        }
         double airborneMultiplier = player.isOnGround() ? 1.0 : 1.08;
         double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier
                 * stanceMultiplier * surfaceMultiplier * airborneMultiplier;
@@ -616,6 +621,7 @@ public final class MotionCheck implements Listener {
         return material == Material.WATER || material == Material.LAVA
                 || material == Material.COBWEB || material == Material.POWDER_SNOW
                 || material == Material.SCAFFOLDING || material == Material.BUBBLE_COLUMN
+                || name.contains("BERRY_BUSH")
                 || name.contains("LADDER") || name.contains("VINE");
     }
 
