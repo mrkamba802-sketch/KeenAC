@@ -384,7 +384,13 @@ public final class GhostMenuCheck implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        clearTracking(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        clearTracking(id);
+        frozenUntil.remove(id);
+        frozenPositions.remove(id);
+        lastGroundedPositions.remove(id);
+        lastGroundedAt.remove(id);
+        lastFreezeAttemptAlert.remove(id);
     }
 
     @EventHandler
