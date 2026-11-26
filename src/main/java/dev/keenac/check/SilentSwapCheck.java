@@ -299,7 +299,8 @@ public final class SilentSwapCheck {
             violationLevel = state.violationLevel;
         }
 
-        plugin.getAlertManager().send("SilentSwap", player, violationLevel);
+        plugin.getAlertManager().send("SilentSwap", player, violationLevel,
+                "Rapid hotbar slot swapping around an attack was detected without the expected main-hand swing.");
         if (plugin.getConfig().getBoolean("checks.silent-swap.log-context", true)) {
             plugin.getLogger().info("SilentSwap confirmed for " + player.getName()
                     + " (VL=" + violationLevel
