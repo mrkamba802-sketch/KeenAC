@@ -23,7 +23,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class WallInteractCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastAlertMillis = new ConcurrentHashMap<>();
 
     public WallInteractCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -82,12 +81,10 @@ public final class WallInteractCheck implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         violations.remove(id);
-        lastAlertMillis.remove(id);
     }
 
     public void clearAll() {
         violations.clear();
-        lastAlertMillis.clear();
     }
 
     private boolean enabled() {
@@ -143,14 +140,7 @@ public final class WallInteractCheck implements Listener {
         UUID id = player.getUniqueId();
         int level = violations.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
-        long now = System.currentTimeMillis();
-        long cooldown = Math.max(0L,
-                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
-        long previous = lastAlertMillis.getOrDefault(id, 0L);
-        if (now - previous >= cooldown) {
-            plugin.getAlertManager().send("WallInteract", player, level, reason);
-            lastAlertMillis.put(id, now);
-        }
+        plugin.getAlertManager().send("WallInteract", player, level, reason);
     }
 
     /**
