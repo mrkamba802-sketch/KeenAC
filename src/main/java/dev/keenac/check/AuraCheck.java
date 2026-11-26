@@ -171,7 +171,8 @@ public final class AuraCheck implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Player player = Bukkit.getPlayer(attackerId);
                 if (player != null && player.isOnline()) {
-                    plugin.getAlertManager().send("Aura", player, vl);
+                    plugin.getAlertManager().send("Aura", player, vl,
+                            "Repeated attacks were registered from suspiciously wide aiming angles.");
                 }
             });
         }
