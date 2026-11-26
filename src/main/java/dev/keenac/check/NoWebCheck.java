@@ -148,7 +148,11 @@ public final class NoWebCheck implements Listener {
 
         // These movement modes have additional physics that this web-specific
         // horizontal/vertical envelope does not model reliably.
-        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()) {
+        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()
+                || overlapsAlternativePhysicsBlock(player, from)
+                || overlapsAlternativePhysicsBlock(player, to)) {
+            // Powder snow, berry bushes, ladders, vines and scaffolding have
+            // movement rules that can override or replace cobweb slowdown.
             states.remove(id);
             lastPacketLocations.put(id, to.clone());
             return;
@@ -272,7 +276,7 @@ public final class NoWebCheck implements Listener {
         double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
         // Normalize sub-tick packet spacing; cap long stalls to avoid a
         // large one-off allowance after a delayed client update.
-        return Math.max(1.0, Math.min(4.0, elapsed));
+        return Math.max(0.5, Math.min(4.0, elapsed));
     }
 
     private boolean exceedsWebMovement(Location from, Location to,
@@ -407,7 +411,7 @@ public final class NoWebCheck implements Listener {
         // allowance. This keeps the limit consistent across packet batching.
         // 25% of the normal 4.317 blocks/sec walking speed is about 0.054
         // blocks per tick. Clamp legacy config values to a sane vanilla range.
-        double configuredPerTick = Math.max(0.035, Math.min(0.075,
+        double configuredPerTick = Math.max(0.052, Math.min(0.075,
                 plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.054)));
         double bufferPerTick = Math.max(0.0, Math.min(0.001,
                 plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.00075)));
@@ -538,6 +542,38 @@ public final class NoWebCheck implements Listener {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     if (world.getBlockAt(x, y, z).getType() == Material.COBWEB) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean overlapsAlternativePhysicsBlock(Player player, Location location) {
+        World world = location.getWorld();
+        if (world == null) return false;
+
+        double halfWidth = 0.3;
+        double height = player.isSneaking() ? 1.5 : 1.8;
+        int minX = floor(location.getX() - halfWidth);
+        int maxX = floor(location.getX() + halfWidth);
+        int minY = floor(location.getY());
+        int maxY = floor(location.getY() + height);
+        int minZ = floor(location.getZ() - halfWidth);
+        int maxZ = floor(location.getZ() + halfWidth);
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Material type = world.getBlockAt(x, y, z).getType();
+                    String name = type.name();
+                    if (type == Material.POWDER_SNOW
+                            || type == Material.SWEET_BERRY_BUSH
+                            || type == Material.SCAFFOLDING
+                            || type == Material.BUBBLE_COLUMN
+                            || type == Material.WATER || type == Material.LAVA
+                            || name.contains("LADDER") || name.contains("VINE")) {
                         return true;
                     }
                 }
