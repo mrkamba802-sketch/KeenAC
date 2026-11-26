@@ -422,8 +422,9 @@ public final class NoWebCheck implements Listener {
         }
 
         if (floor == Material.SOUL_SAND || floor == Material.SOUL_SOIL) {
-            var boots = player.getInventory().getBoots();
-            int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
+            var soulSpeedBoots = player.getInventory().getBoots();
+            int soulSpeed = soulSpeedBoots == null ? 0
+                    : soulSpeedBoots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
             if (soulSpeed > 0) {
                 // Soul Speed removes Soul Sand's slowdown; its attribute modifier
                 // is already included in the movement multiplier above.
