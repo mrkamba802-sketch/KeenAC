@@ -5,10 +5,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -55,43 +52,6 @@ public final class InvHitCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         openContainerViews.remove(id);
         recentPersonalInventoryActivity.remove(id);
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player player)
-                || event.getView().getType() != InventoryType.CRAFTING
-                || event.getClickedInventory() == null) {
-            return;
-        }
-
-        if (event.getClickedInventory().getType() == InventoryType.PLAYER
-                || event.getClickedInventory().getType() == InventoryType.CRAFTING) {
-            rememberPersonalInventoryActivity(player.getUniqueId());
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getWhoClicked() instanceof Player player
-                && event.getView().getType() == InventoryType.CRAFTING
-                && !event.getRawSlots().isEmpty()) {
-            rememberPersonalInventoryActivity(player.getUniqueId());
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onEntityDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Player attacker)
-                || !plugin.getConfig().getBoolean("checks.inv-hit.enabled", true)
-                || !isInventoryOpen(attacker.getUniqueId())) {
-            return;
-        }
-
-        if (plugin.getConfig().getBoolean("checks.inv-hit.cancel-hits", true)) {
-            event.setCancelled(true);
-        }
-        reportViolation(attacker);
     }
 
     /**
