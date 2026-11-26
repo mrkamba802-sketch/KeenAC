@@ -7,6 +7,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -18,12 +19,15 @@ import org.bukkit.potion.PotionEffectType;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Conservative, alert-only placement consistency review. */
 public final class ScaffoldCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, State> states = new ConcurrentHashMap<>();
     private final Map<UUID, Long> velocity = new ConcurrentHashMap<>();
+    private final Map<UUID, ConcurrentLinkedQueue<PlacementIntent>> packetPlacements =
+            new ConcurrentHashMap<>();
     private volatile boolean enabled;
     private volatile int threshold;
     private volatile long cooldownMs;
@@ -39,27 +43,47 @@ public final class ScaffoldCheck implements Listener {
     }
 
     /**
-     * Called on the main thread after PacketEvents decodes a serverbound block-use packet.
-     * The clicked face is used to derive the block position the client intended to place.
+     * PacketEvents callback. Store only the attempted target block coordinates;
+     * the following Bukkit BlockPlaceEvent confirms the server accepted the placement.
      */
-    public void handlePacketPlacement(UUID id, int clickedX, int clickedY, int clickedZ,
-                                       int faceX, int faceY, int faceZ, boolean mainHand) {
+    public void recordPacketPlacement(UUID id, int clickedX, int clickedY, int clickedZ,
+                                       int faceX, int faceY, int faceZ) {
         if (!enabled || id == null) return;
-        Player player = Bukkit.getPlayer(id);
-        if (player == null || !player.isOnline()) return;
+        ConcurrentLinkedQueue<PlacementIntent> queue =
+                packetPlacements.computeIfAbsent(id, ignored -> new ConcurrentLinkedQueue<>());
+        queue.add(new PlacementIntent(clickedX + faceX, clickedY + faceY,
+                clickedZ + faceZ, System.nanoTime()));
+        while (queue.size() > 16) {
+            if (queue.poll() == null) break;
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onConfirmedPacketPlacement(BlockPlaceEvent event) {
+        if (!enabled) return;
+        Player player = event.getPlayer();
+        UUID id = player.getUniqueId();
+        ConcurrentLinkedQueue<PlacementIntent> queue = packetPlacements.get(id);
+        if (queue == null) return;
+
+        long packetNow = System.nanoTime();
+        PlacementIntent intent = queue.peek();
+        while (intent != null && packetNow - intent.atNanos > 500_000_000L) {
+            queue.poll();
+            intent = queue.peek();
+        }
+        if (intent == null || intent.x != event.getBlock().getX()
+                || intent.y != event.getBlock().getY()
+                || intent.z != event.getBlock().getZ()) {
+            return;
+        }
+        queue.poll();
+
         if (!eligible(player)) {
             states.remove(id);
             return;
         }
 
-        // A use-on-block packet can also mean food, buckets, doors or other
-        // interactions. Only count it when the selected hand currently holds a block.
-        org.bukkit.inventory.ItemStack held = mainHand
-                ? player.getInventory().getItemInMainHand()
-                : player.getInventory().getItemInOffHand();
-        if (held == null || held.getType().isAir() || !held.getType().isBlock()) return;
-
-        int placedY = clickedY + faceY;
         long now = System.currentTimeMillis();
         State state = states.computeIfAbsent(id, ignored -> new State());
         if (state.lastPlace > 0 && now - state.lastPlace > 900) {
@@ -68,7 +92,7 @@ public final class ScaffoldCheck implements Listener {
         }
 
         boolean unusualContext = !player.isOnGround()
-                && player.getLocation().getBlockY() <= placedY;
+                && player.getLocation().getBlockY() <= event.getBlock().getY();
         if (unusualContext) {
             state.streak++;
             state.score += 1.0;
@@ -82,15 +106,9 @@ public final class ScaffoldCheck implements Listener {
             state.vl++;
             int vl = state.vl;
             int streak = state.streak;
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                Player online = Bukkit.getPlayer(id);
-                if (online != null && online.isOnline() && plugin.getAlertManager() != null
-                        && plugin.getConfig().getBoolean("checks.scaffold.enabled", true)) {
-                    plugin.getAlertManager().send("Scaffold", online, vl);
-                    plugin.getLogger().warning("Scaffold placement review for " + online.getName()
-                            + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
-                }
-            });
+            plugin.getAlertManager().send("Scaffold", player, vl);
+            plugin.getLogger().warning("Scaffold placement review for " + player.getName()
+                    + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
         }
     }
 
@@ -118,7 +136,17 @@ public final class ScaffoldCheck implements Listener {
     public void onJoin(PlayerJoinEvent e) { reset(e.getPlayer().getUniqueId()); }
     @EventHandler(priority=EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent e) { reset(e.getPlayer().getUniqueId()); }
-    private void reset(UUID id) { states.remove(id); velocity.remove(id); }
-    public void clearAll() { states.clear(); velocity.clear(); }
+    private void reset(UUID id) {
+        states.remove(id);
+        velocity.remove(id);
+        packetPlacements.remove(id);
+    }
+    public void clearAll() {
+        states.clear();
+        velocity.clear();
+        packetPlacements.values().forEach(ConcurrentLinkedQueue::clear);
+        packetPlacements.clear();
+    }
+    private record PlacementIntent(int x, int y, int z, long atNanos) { }
     private static final class State { int streak, vl; double score; long lastPlace, lastAlert; }
 }
