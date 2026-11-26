@@ -47,6 +47,7 @@ public final class NoWebCheck implements Listener {
             }
             states.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
             lastPacketLocations.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
+            pearlGraceUntilNanos.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
         }, 1L, 1L);
     }
 
