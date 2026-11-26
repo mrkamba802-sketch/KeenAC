@@ -116,16 +116,21 @@ public final class NoSlowCheck implements Listener {
     private void beginUse(Player player, long now) {
         UUID id = player.getUniqueId();
         UseData data = usingItems.get(id);
+        Location current = player.getLocation().clone();
         if (data == null) {
-            usingItems.put(id, new UseData(player.getLocation().clone(), now, 0));
+            data = new UseData(current, now, 0);
+            usingItems.put(id, data);
         } else {
-            data.lastLocation = player.getLocation().clone();
+            data.lastLocation = current.clone();
             data.lastSampleNanos = now;
             data.lastUseAttemptNanos = now;
             data.samples = 0;
             data.normalSamples = 0;
+            data.suspiciousDistance = 0.0;
             data.lastSuspiciousNanos = 0L;
+            data.lastValidLocation = current.clone();
         }
+        plugin.getMovementSetbackManager().recordValidPosition(player, current);
         ConcurrentLinkedQueue<PacketMovement> queue = packetMovements.get(id);
         if (queue != null) queue.clear();
     }
@@ -149,10 +154,13 @@ public final class NoSlowCheck implements Listener {
 
         if (isExempt(player, to.getBlock())) {
             data.lastLocation = to.clone();
+            data.lastValidLocation = to.clone();
             data.lastSampleNanos = sampleNanos;
             data.samples = 0;
             data.normalSamples = 0;
+            data.suspiciousDistance = 0.0;
             data.lastSuspiciousNanos = 0L;
+            plugin.getMovementSetbackManager().recordValidPosition(player, to);
             pendingConsumeCancellation.remove(id);
             return;
         }
@@ -170,12 +178,16 @@ public final class NoSlowCheck implements Listener {
         data.lastSampleNanos = sampleNanos;
         if (suspicious) {
             data.samples++;
+            data.suspiciousDistance += horizontal;
             data.normalSamples = 0;
             data.lastSuspiciousNanos = sampleNanos;
         } else {
             data.samples = Math.max(0, data.samples - 1);
+            data.suspiciousDistance = 0.0;
             data.normalSamples++;
             data.lastSuspiciousNanos = 0L;
+            data.lastValidLocation = to.clone();
+            plugin.getMovementSetbackManager().recordValidPosition(player, to);
             if (data.normalSamples >= 3) {
                 violations.remove(id);
                 lastViolationNanos.remove(id);
@@ -186,9 +198,31 @@ public final class NoSlowCheck implements Listener {
         }
 
         int required = Math.max(3, plugin.getConfig().getInt("checks.no-slow.required-samples", 6));
-        if (data.samples >= required) {
+        int minimumSetbackSamples = Math.max(2, Math.min(required,
+                plugin.getConfig().getInt("checks.no-slow.setback.minimum-samples", 2)));
+        double setbackDistance = Math.max(0.10, Math.min(0.30,
+                plugin.getConfig().getDouble("checks.no-slow.setback.threshold-distance", 0.18)));
+        boolean distanceConfirmed = data.samples >= minimumSetbackSamples
+                && data.suspiciousDistance >= setbackDistance;
+
+        if (data.samples >= required || distanceConfirmed) {
             recordViolation(player);
+
+            // NoSlow's food/consume interruption logic remains independent and unchanged.
+            if (plugin.getConfig().getBoolean("checks.no-slow.setback.enabled", true)) {
+                plugin.getMovementSetbackManager().setback(player, data.lastValidLocation, "NoSlow");
+            }
+
             data.samples = 0;
+            data.suspiciousDistance = 0.0;
+            data.normalSamples = 0;
+            data.lastSampleNanos = System.nanoTime();
+            data.lastLocation = player.getLocation().clone();
+            data.lastValidLocation = data.lastLocation.clone();
+
+            ConcurrentLinkedQueue<PacketMovement> queued = packetMovements.get(id);
+            if (queued != null) queued.clear();
+
             int currentVl = violations.getOrDefault(id, 0);
             if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && currentVl >= 3) {
                 Material used = getTrackedItemType(player);
@@ -430,14 +464,17 @@ public final class NoSlowCheck implements Listener {
 
     private static final class UseData {
         private org.bukkit.Location lastLocation;
+        private org.bukkit.Location lastValidLocation;
         private long lastSampleNanos;
         private int samples;
         private int normalSamples;
+        private double suspiciousDistance;
         private long lastSuspiciousNanos;
         private long lastUseAttemptNanos;
 
         private UseData(org.bukkit.Location location, long now, int samples) {
-            this.lastLocation = location;
+            this.lastLocation = location.clone();
+            this.lastValidLocation = location.clone();
             this.lastSampleNanos = now;
             this.lastUseAttemptNanos = now;
             this.samples = samples;
