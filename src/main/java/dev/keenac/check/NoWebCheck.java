@@ -156,7 +156,12 @@ public final class NoWebCheck implements Listener {
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
-        double maxDistance = getAllowedMoveDistance(player, state, now, to);
+        double elapsedTicks = getElapsedTicks(state, now);
+        double maxHorizontalDistance = getAllowedMoveDistance(player, to, elapsedTicks);
+        // Cobwebs also slow falling, but vertical motion is not the same as
+        // horizontal walking speed. Keep a separate, deliberately broader
+        // vanilla fall/jump envelope so ordinary descent is never flagged.
+        double maxVerticalDistance = 0.08 * elapsedTicks + 0.005;
         if (state != null) {
             state.lastMovementNanos = now;
         }
@@ -179,8 +184,7 @@ public final class NoWebCheck implements Listener {
                 return;
             }
 
-            double moved = from.distance(to);
-            if (moved > maxDistance) {
+            if (exceedsWebMovement(from, to, maxHorizontalDistance, maxVerticalDistance)) {
                 state.normalMovementSamples = 0;
                 returnToAnchor(player, to, state);
                 countViolation(player, state);
@@ -225,8 +229,7 @@ public final class NoWebCheck implements Listener {
             states.put(id, state);
         }
 
-        double moved = from.distance(to);
-        if (moved > maxDistance) {
+        if (exceedsWebMovement(from, to, maxHorizontalDistance, maxVerticalDistance)) {
             countViolation(player, state);
             if (state.violationLevel >= 2) {
                 state.locked = true;
@@ -237,6 +240,26 @@ public final class NoWebCheck implements Listener {
         }
 
         state.lastSafe = to.clone();
+    }
+
+    private double getElapsedTicks(PlayerState state, long now) {
+        if (state == null || state.lastMovementNanos <= 0L) {
+            return 1.0;
+        }
+        double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
+        // Normalize sub-tick packet spacing; cap long stalls to avoid a
+        // large one-off allowance after a delayed client update.
+        return Math.max(0.5, Math.min(4.0, elapsed));
+    }
+
+    private boolean exceedsWebMovement(Location from, Location to,
+                                       double maxHorizontalDistance, double maxVerticalDistance) {
+        double dx = to.getX() - from.getX();
+        double dz = to.getZ() - from.getZ();
+        double horizontalDistance = Math.hypot(dx, dz);
+        double verticalDistance = Math.abs(to.getY() - from.getY());
+        return horizontalDistance > maxHorizontalDistance
+                || verticalDistance > maxVerticalDistance;
     }
 
     private boolean isInsideElytraGrace(UUID id, long now) {
@@ -356,7 +379,7 @@ public final class NoWebCheck implements Listener {
      * allowance by the observed interval instead of using one fixed packet
      * distance for every player and every connection.
      */
-    private double getAllowedMoveDistance(Player player, PlayerState state, long now, Location movementLocation) {
+    private double getAllowedMoveDistance(Player player, Location movementLocation, double elapsedTicks) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
         double configuredPerTick = Math.max(0.01, Math.min(0.027,
@@ -430,14 +453,6 @@ public final class NoWebCheck implements Listener {
                 // is already included in the movement multiplier above.
                 iceMultiplier = 1.0;
             }
-        }
-
-        double elapsedTicks = 1.0;
-        if (state != null && state.lastMovementNanos > 0L) {
-            double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
-            // Normalize sub-tick packet spacing; cap long stalls to avoid a
-            // large one-off allowance after a delayed client update.
-            elapsedTicks = Math.max(0.5, Math.min(4.0, elapsed));
         }
 
         // Scale the tolerance with stance too; otherwise blocking/sneaking
