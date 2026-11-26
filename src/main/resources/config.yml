@@ -60,7 +60,9 @@ checks:
     max-ping-ms: 250
     # The E-inventory is client-side; detection is best-effort after window-0 clicks.
     personal-inventory-window-ms: 2200
-    # Escalation freeze after the fourth confirmed GhostHand suspicion.
+    # Watch movement briefly after x3 closes the GUI; continued movement becomes x4.
+    post-close-watch-ms: 1500
+    # Escalation freeze after x4 and subsequent movement attempts.
     freeze-duration-ms: 2500
     log-context: true
 
