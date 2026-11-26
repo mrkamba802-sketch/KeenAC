@@ -11,7 +11,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
@@ -20,6 +19,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Set;
 
 public final class NoWebCheck implements Listener {
     private static final long VIOLATION_DECAY_NANOS = 5_000_000_000L;
@@ -27,48 +29,80 @@ public final class NoWebCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
+    private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
+            new ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastPacketLocations = new HashMap<>();
+    private final Set<UUID> applyingCorrection = ConcurrentHashMap.newKeySet();
     private long serverTick;
 
     public NoWebCheck(KeenAC plugin) {
         this.plugin = plugin;
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             serverTick++;
+            processPacketMovements();
             if (serverTick % 20L == 0L) {
                 decayStates();
             }
             states.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
+            lastPacketLocations.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
         }, 1L, 1L);
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        Player player = event.getPlayer();
-        UUID id = player.getUniqueId();
-
-        // Administrative/plugin teleports must remain possible and reset this check.
-        if (event instanceof PlayerTeleportEvent) {
-            states.remove(id);
-            elytraGraceUntilNanos.remove(id);
+    /**
+     * PacketEvents callback: queues immutable movement data only.
+     * World queries and player corrections are processed by the sync tick task.
+     */
+    public void recordPacketPosition(UUID id, double x, double y, double z,
+                                     float yaw, float pitch) {
+        if (id == null || !Double.isFinite(x) || !Double.isFinite(y)
+                || !Double.isFinite(z) || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
             return;
         }
+        ConcurrentLinkedQueue<PacketPosition> queue =
+                packetPositions.computeIfAbsent(id, ignored -> new ConcurrentLinkedQueue<>());
+        queue.add(new PacketPosition(x, y, z, yaw, pitch, System.nanoTime()));
+        while (queue.size() > 128) {
+            if (queue.poll() == null) break;
+        }
+    }
+
+    private void processPacketMovements() {
+        for (Map.Entry<UUID, ConcurrentLinkedQueue<PacketPosition>> entry : packetPositions.entrySet()) {
+            UUID id = entry.getKey();
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.isOnline()) {
+                entry.getValue().clear();
+                continue;
+            }
+
+            PacketPosition sample;
+            while ((sample = entry.getValue().poll()) != null) {
+                Location from = lastPacketLocations.get(id);
+                if (from == null || from.getWorld() != player.getWorld()) {
+                    from = player.getLocation().clone();
+                }
+                Location to = new Location(player.getWorld(), sample.x, sample.y, sample.z,
+                        sample.yaw, sample.pitch);
+                processPacketMovement(player, from, to, sample.atNanos);
+                lastPacketLocations.put(id, to.clone());
+            }
+        }
+    }
+
+    private void processPacketMovement(Player player, Location from, Location to, long now) {
+        UUID id = player.getUniqueId();
 
         if (!plugin.getConfig().getBoolean("checks.no-web.enabled", true)) {
             states.remove(id);
             return;
         }
 
-        long now = System.nanoTime();
-        // Elytra flight is allowed to carry the player through cobwebs. A short
-        // grace period after either glide transition also covers the collision
-        // tick where the server may stop gliding while the player is in the web.
         if (player.isGliding() || isInsideElytraGrace(id, now)) {
             states.remove(id);
             return;
         }
 
-        Location from = event.getFrom();
-        Location to = event.getTo();
-        if (to == null || from.getWorld() != to.getWorld()) {
+        if (to == null || from == null || from.getWorld() != to.getWorld()) {
             states.remove(id);
             return;
         }
@@ -81,13 +115,8 @@ public final class NoWebCheck implements Listener {
             state.lastMovementNanos = now;
         }
 
-        // Once VL reaches x2, only unusually large movement remains blocked.
-        // Normal-sized movement immediately releases the anchor so a player who
-        // turns the speed exploit off is not trapped by stale violation state.
         if (state != null && state.locked) {
             if (!toInWeb) {
-                // Leaving the cobweb releases movement correction, but the
-                // accumulated VL belongs to this player session and is retained.
                 state.locked = false;
                 state.anchor = null;
                 state.normalMovementSamples = 0;
@@ -106,18 +135,12 @@ public final class NoWebCheck implements Listener {
 
             double moved = from.distance(to);
             if (moved > maxDistance) {
-                // Keep correcting excessive movement and continue increasing VL
-                // once per server tick. Reaching x2 must not freeze alerts at x2.
                 state.normalMovementSamples = 0;
-                returnToAnchor(event, state);
+                returnToAnchor(player, to, state);
                 countViolation(player, state);
                 return;
             }
 
-            // A single legal-sized movement packet is not enough to release a
-            // player from the anchor. Let normal movement through, and release
-            // the lock after several consecutive legal samples. Never decrement
-            // VL here: alert levels must remain monotonic during one violation.
             state.lastSafe = to.clone();
             state.anchor = to.clone();
             if (moved > 0.005) {
@@ -130,7 +153,6 @@ public final class NoWebCheck implements Listener {
             return;
         }
 
-        // Entering or leaving a cobweb is not itself a violation.
         if (!fromInWeb || !toInWeb) {
             if (!fromInWeb && !toInWeb) {
                 if (state == null || state.violationLevel == 0) states.remove(id);
@@ -139,8 +161,6 @@ public final class NoWebCheck implements Listener {
                 state.lastSafe = to.clone();
                 states.put(id, state);
             } else {
-                // Do not reset xVL when the player leaves the web. The next
-                // entry resumes the same violation counter instead of starting at x1.
                 if (state != null && state.violationLevel > 0) {
                     state.locked = false;
                     state.anchor = null;
@@ -165,7 +185,7 @@ public final class NoWebCheck implements Listener {
             if (state.violationLevel >= 2) {
                 state.locked = true;
                 state.anchor = state.lastSafe == null ? from.clone() : state.lastSafe.clone();
-                returnToAnchor(event, state);
+                returnToAnchor(player, to, state);
             }
             return;
         }
@@ -179,6 +199,17 @@ public final class NoWebCheck implements Listener {
         if (now <= until) return true;
         elytraGraceUntilNanos.remove(id, until);
         return false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        if (applyingCorrection.contains(id)) return;
+        states.remove(id);
+        elytraGraceUntilNanos.remove(id);
+        lastPacketLocations.remove(id);
+        ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
+        if (queue != null) queue.clear();
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -259,15 +290,21 @@ public final class NoWebCheck implements Listener {
         return configured * speedMultiplier * elapsedTickMultiplier + 0.01;
     }
 
-    private void returnToAnchor(PlayerMoveEvent event, PlayerState state) {
+    private void returnToAnchor(Player player, Location requested, PlayerState state) {
         Location correction = state.anchor.clone();
-        Location requested = event.getTo();
         if (requested != null) {
-            // Keep camera rotation responsive; only lock the player's coordinates.
             correction.setYaw(requested.getYaw());
             correction.setPitch(requested.getPitch());
         }
-        event.setTo(correction);
+        UUID id = player.getUniqueId();
+        applyingCorrection.add(id);
+        try {
+            player.teleport(correction,
+                    PlayerTeleportEvent.TeleportCause.PLUGIN);
+        } finally {
+            applyingCorrection.remove(id);
+        }
+        lastPacketLocations.put(id, correction.clone());
     }
 
     private void countViolation(Player player, PlayerState state) {
@@ -316,7 +353,20 @@ public final class NoWebCheck implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
+        lastPacketLocations.remove(id);
+        packetPositions.remove(id);
     }
+
+    public void clearAll() {
+        states.clear();
+        elytraGraceUntilNanos.clear();
+        lastPacketLocations.clear();
+        packetPositions.clear();
+        applyingCorrection.clear();
+    }
+
+    private record PacketPosition(double x, double y, double z,
+                                  float yaw, float pitch, long atNanos) { }
 
     private static final class PlayerState {
         private Location lastSafe;
