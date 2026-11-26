@@ -130,6 +130,11 @@ public final class NoFallCheck implements Listener {
         long candidateSafePositionAt = 0L;
 
         synchronized (state) {
+            if (profile.safeSurface) {
+                state.reset();
+                return;
+            }
+
             // Exempt landing surfaces end the review. Physical support is
             // deliberately not an early return: the final onGround packet may
             // arrive after collision support has already updated.
