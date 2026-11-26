@@ -8,11 +8,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.Location;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.enchantments.Enchantment;
@@ -21,6 +19,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Set;
 
 public final class NoSlowCheck implements Listener {
     private static final long MAX_USE_TICKS = 80L;
@@ -31,68 +32,123 @@ public final class NoSlowCheck implements Listener {
     private final Map<UUID, Material> pendingConsumeCancellation = new HashMap<>();
     private final Map<UUID, Long> lastInterruptionAlertNanos = new HashMap<>();
     private final Map<UUID, Long> lastAirborneNanos = new HashMap<>();
+    private final Map<UUID, Long> pendingUsePackets = new ConcurrentHashMap<>();
+    private final Set<UUID> pendingUseReleases = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, ConcurrentLinkedQueue<PacketMovement>> packetMovements =
+            new ConcurrentHashMap<>();
 
     public NoSlowCheck(KeenAC plugin) {
         this.plugin = plugin;
         Bukkit.getScheduler().runTaskTimer(plugin, this::decayViolations, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::interruptFlaggedUse, 1L, 1L);
+        Bukkit.getScheduler().runTaskTimer(plugin, this::processPacketInputs, 1L, 1L);
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInteract(PlayerInteractEvent event) {
-        if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) return;
-        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        Player player = event.getPlayer();
-        if (isTrackedConsumable(player.getInventory().getItemInMainHand())
-                || isTrackedConsumable(player.getInventory().getItemInOffHand())) {
-            UUID id = player.getUniqueId();
-            long now = System.nanoTime();
-            UseData data = usingItems.get(id);
-            if (data == null) {
-                usingItems.put(id, new UseData(player.getLocation().clone(), now, 0));
-            } else {
-                // A new attempt must be judged from fresh movement samples.
-                // Old suspicious samples must not keep interrupting a player
-                // who has already disabled the speed exploit.
-                data.lastLocation = player.getLocation().clone();
-                data.lastSampleNanos = now;
-                data.lastUseAttemptNanos = now;
-                data.samples = 0;
-                data.normalSamples = 0;
-                data.lastSuspiciousNanos = 0L;
+    /** PacketEvents callbacks only enqueue primitive data; this method runs synchronously. */
+    public void recordUseIntent(UUID id) {
+        if (id != null && plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) {
+            pendingUsePackets.put(id, System.nanoTime());
+        }
+    }
+
+    public void recordUseRelease(UUID id) {
+        if (id != null) pendingUseReleases.add(id);
+    }
+
+    public void recordPacketMovement(UUID id, double x, double y, double z) {
+        if (id == null || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return;
+        ConcurrentLinkedQueue<PacketMovement> queue =
+                packetMovements.computeIfAbsent(id, ignored -> new ConcurrentLinkedQueue<>());
+        queue.add(new PacketMovement(x, y, z, System.nanoTime()));
+        while (queue.size() > 128) {
+            if (queue.poll() == null) break;
+        }
+    }
+
+    private void processPacketInputs() {
+        if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) {
+            pendingUsePackets.clear();
+            pendingUseReleases.clear();
+            packetMovements.values().forEach(ConcurrentLinkedQueue::clear);
+            usingItems.clear();
+            return;
+        }
+
+        long now = System.nanoTime();
+        for (Map.Entry<UUID, Long> entry : pendingUsePackets.entrySet()) {
+            UUID id = entry.getKey();
+            long at = entry.getValue();
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.isOnline() || now - at > 500_000_000L) {
+                pendingUsePackets.remove(id, at);
+                continue;
+            }
+            if (player.hasActiveItem() && isTrackedConsumable(player.getActiveItem())) {
+                beginUse(player, at);
+                pendingUsePackets.remove(id, at);
+            }
+        }
+
+        for (UUID id : pendingUseReleases) {
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.hasActiveItem()) {
+                if (!pendingConsumeCancellation.containsKey(id)) usingItems.remove(id);
+                pendingUseReleases.remove(id);
+            }
+        }
+
+        for (Map.Entry<UUID, ConcurrentLinkedQueue<PacketMovement>> entry : packetMovements.entrySet()) {
+            UUID id = entry.getKey();
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.isOnline()) {
+                entry.getValue().clear();
+                continue;
+            }
+            PacketMovement sample;
+            while ((sample = entry.getValue().poll()) != null) {
+                Location to = new Location(player.getWorld(), sample.x, sample.y, sample.z);
+                handlePacketMovement(player, to, sample.atNanos);
             }
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) return;
-        if (event.getTo() == null) return;
-        Player player = event.getPlayer();
+    private void beginUse(Player player, long now) {
         UUID id = player.getUniqueId();
-        // hasActiveItem() is the server-side usage state. Unlike the old
-        // hand-raised pose check, it also works while the player is swimming.
+        UseData data = usingItems.get(id);
+        if (data == null) {
+            usingItems.put(id, new UseData(player.getLocation().clone(), now, 0));
+        } else {
+            data.lastLocation = player.getLocation().clone();
+            data.lastSampleNanos = now;
+            data.lastUseAttemptNanos = now;
+            data.samples = 0;
+            data.normalSamples = 0;
+            data.lastSuspiciousNanos = 0L;
+        }
+        ConcurrentLinkedQueue<PacketMovement> queue = packetMovements.get(id);
+        if (queue != null) queue.clear();
+    }
+
+    private void handlePacketMovement(Player player, Location to, long sampleNanos) {
+        if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) return;
+        UUID id = player.getUniqueId();
         if (!player.hasActiveItem() || !isTrackedConsumable(player.getActiveItem())) {
-            // The check itself may have interrupted item use. Keep the pending
-            // state and samples so we can resume measuring when the player tries again.
-            if (!pendingConsumeCancellation.containsKey(id)) {
-                usingItems.remove(id);
-            }
+            if (!pendingConsumeCancellation.containsKey(id)) usingItems.remove(id);
             return;
         }
         UseData data = usingItems.get(id);
         if (data == null) return;
 
-        long elapsedNanos = System.nanoTime() - data.lastSampleNanos;
+        long elapsedNanos = sampleNanos - data.lastSampleNanos;
         if (elapsedNanos < 35_000_000L) return;
         if (elapsedNanos > MAX_USE_TICKS * 50_000_000L) {
             usingItems.remove(id);
             return;
         }
 
-        if (isExempt(player, event.getTo().getBlock())) {
-            data.lastLocation = event.getTo().clone();
-            data.lastSampleNanos = System.nanoTime();
+        if (isExempt(player, to.getBlock())) {
+            data.lastLocation = to.clone();
+            data.lastSampleNanos = sampleNanos;
             data.samples = 0;
             data.normalSamples = 0;
             data.lastSuspiciousNanos = 0L;
@@ -100,28 +156,24 @@ public final class NoSlowCheck implements Listener {
             return;
         }
 
-        double dx = event.getTo().getX() - data.lastLocation.getX();
-        double dz = event.getTo().getZ() - data.lastLocation.getZ();
+        double dx = to.getX() - data.lastLocation.getX();
+        double dz = to.getZ() - data.lastLocation.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
-        // Do not let one delayed movement event accumulate several seconds of
-        // movement allowance. Normal packet jitter is still covered by tolerance.
         double seconds = Math.min(elapsedNanos / 1_000_000_000.0, 0.25);
         boolean inWater = player.isInWater() || player.isSwimming();
         double allowed = getAllowedItemUseSpeed(player, inWater) * seconds * 1.45
                 + (inWater ? 0.012 : 0.02);
         boolean suspicious = horizontal > allowed && horizontal > (inWater ? 0.035 : 0.09);
 
-        data.lastLocation = event.getTo().clone();
-        data.lastSampleNanos = System.nanoTime();
+        data.lastLocation = to.clone();
+        data.lastSampleNanos = sampleNanos;
         if (suspicious) {
             data.samples++;
             data.normalSamples = 0;
-            data.lastSuspiciousNanos = System.nanoTime();
+            data.lastSuspiciousNanos = sampleNanos;
         } else {
             data.samples = Math.max(0, data.samples - 1);
             data.normalSamples++;
-            // The first normal-speed sample immediately stops repeated interruptions.
-            // Three consecutive normal samples also clear the old VL completely.
             data.lastSuspiciousNanos = 0L;
             if (data.normalSamples >= 3) {
                 violations.remove(id);
@@ -143,6 +195,7 @@ public final class NoSlowCheck implements Listener {
             }
         }
     }
+
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onConsume(PlayerItemConsumeEvent event) {
@@ -175,6 +228,10 @@ public final class NoSlowCheck implements Listener {
         pendingConsumeCancellation.remove(id);
         lastInterruptionAlertNanos.remove(id);
         lastAirborneNanos.remove(id);
+        pendingUsePackets.remove(id);
+        pendingUseReleases.remove(id);
+        ConcurrentLinkedQueue<PacketMovement> queue = packetMovements.remove(id);
+        if (queue != null) queue.clear();
     }
 
     public void clearAll() {
@@ -184,6 +241,10 @@ public final class NoSlowCheck implements Listener {
         pendingConsumeCancellation.clear();
         lastInterruptionAlertNanos.clear();
         lastAirborneNanos.clear();
+        pendingUsePackets.clear();
+        pendingUseReleases.clear();
+        packetMovements.values().forEach(ConcurrentLinkedQueue::clear);
+        packetMovements.clear();
     }
 
     private void interruptFlaggedUse() {
@@ -357,6 +418,8 @@ public final class NoSlowCheck implements Listener {
                 || under == Material.SOUL_SAND || under == Material.SOUL_SOIL
                 || under == Material.MUD;
     }
+
+    private record PacketMovement(double x, double y, double z, long atNanos) { }
 
     private static final class UseData {
         private org.bukkit.Location lastLocation;
