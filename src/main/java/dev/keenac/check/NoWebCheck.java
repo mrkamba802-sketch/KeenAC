@@ -7,6 +7,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -358,9 +359,9 @@ public final class NoWebCheck implements Listener {
     private double getAllowedMoveDistance(Player player, PlayerState state, long now, Location movementLocation) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
-        double configuredPerTick = Math.max(0.01, Math.min(0.030,
+        double configuredPerTick = Math.max(0.01, Math.min(0.027,
                 plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.055)));
-        double bufferPerTick = Math.max(0.0, Math.min(0.010,
+        double bufferPerTick = Math.max(0.0, Math.min(0.002,
                 plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.003)));
 
         double attributeMultiplier = 1.0;
@@ -406,9 +407,25 @@ public final class NoWebCheck implements Listener {
                 floor(sampleLocation.getY() - 0.2),
                 floor(sampleLocation.getZ())).getType();
         double iceMultiplier = 1.0;
-        if (floor.name().contains("ICE")) {
+        if (floor == Material.BLUE_ICE) {
+            iceMultiplier = 0.75;
+        } else if (floor.name().contains("ICE")) {
             // Cobweb slowdown is stronger when the web is placed over ice.
-            iceMultiplier = floor == Material.BLUE_ICE ? 0.75 : 0.85;
+            iceMultiplier = 0.85;
+        } else if (floor == Material.HONEY_BLOCK || floor == Material.SOUL_SAND) {
+            iceMultiplier = 0.58;
+        } else if (floor == Material.SLIME_BLOCK) {
+            iceMultiplier = 0.70;
+        }
+
+        if (floor == Material.SOUL_SAND || floor == Material.SOUL_SOIL) {
+            var boots = player.getInventory().getBoots();
+            int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
+            if (soulSpeed > 0) {
+                // Soul Speed removes Soul Sand's slowdown; its attribute modifier
+                // is already included in the movement multiplier above.
+                iceMultiplier = 1.0;
+            }
         }
 
         double elapsedTicks = 1.0;
