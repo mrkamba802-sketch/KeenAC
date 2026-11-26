@@ -42,7 +42,6 @@ public final class ReachCheck implements Listener {
     private volatile int requiredHits;
     private volatile long windowNanos;
     private volatile long maxRewindNanos;
-    private volatile long alertCooldownNanos;
 
     public ReachCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -59,8 +58,6 @@ public final class ReachCheck implements Listener {
         windowNanos = Math.max(500L, plugin.getConfig().getLong("checks.reach.window-ms", 2500L)) * 1_000_000L;
         maxRewindNanos = Math.max(0L,
                 Math.min(750L, plugin.getConfig().getLong("checks.reach.max-rewind-ms", 500L))) * 1_000_000L;
-        alertCooldownNanos = Math.max(500L,
-                plugin.getConfig().getLong("checks.reach.alert-cooldown-ms", 3000L)) * 1_000_000L;
     }
 
     /** Refresh player positions and target hitboxes once per server tick. */
@@ -159,10 +156,7 @@ public final class ReachCheck implements Listener {
             state.suspiciousHits.clear();
             state.violationLevel++;
             vl = state.violationLevel;
-            if (now - state.lastAlertNanos >= alertCooldownNanos) {
-                state.lastAlertNanos = now;
-                sendAlert = true;
-            }
+            sendAlert = true;
         }
 
         if (sendAlert && plugin.isEnabled()) {
@@ -357,7 +351,6 @@ public final class ReachCheck implements Listener {
     private static final class AttackState {
         private final Deque<Long> suspiciousHits = new ArrayDeque<>();
         private int violationLevel;
-        private long lastAlertNanos;
     }
 
     private static double lerp(double a, double b, double progress) {
