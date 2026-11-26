@@ -249,15 +249,28 @@ public final class NoWebCheck implements Listener {
         }
 
         if (exceedsWebMovement(from, to, maxHorizontalDistance)) {
-            countViolation(player, state);
-            if (state.violationLevel >= 2) {
-                state.locked = true;
-                state.anchor = state.lastSafe == null ? from.clone() : state.lastSafe.clone();
-                returnToAnchor(player, to, state);
+            // Do not count one-off packet spikes as violations. Require the
+            // horizontal excess to persist across several server ticks.
+            if (state.lastExcessTick != serverTick) {
+                state.consecutiveExcessTicks++;
+                state.lastExcessTick = serverTick;
+            }
+
+            int requiredSamples = Math.max(2, Math.min(8,
+                    plugin.getConfig().getInt("checks.no-web.required-samples", 4)));
+            if (state.consecutiveExcessTicks >= requiredSamples) {
+                state.consecutiveExcessTicks = 0;
+                countViolation(player, state);
+                if (state.violationLevel >= 2) {
+                    state.locked = true;
+                    state.anchor = state.lastSafe == null ? from.clone() : state.lastSafe.clone();
+                    returnToAnchor(player, to, state);
+                }
             }
             return;
         }
 
+        state.consecutiveExcessTicks = 0;
         state.lastSafe = to.clone();
     }
 
@@ -586,6 +599,8 @@ public final class NoWebCheck implements Listener {
         private long lastViolationTick = Long.MIN_VALUE;
         private long lastViolationNanos;
         private long lastMovementNanos;
+        private long lastExcessTick = Long.MIN_VALUE;
+        private int consecutiveExcessTicks;
         private int normalMovementSamples;
         private boolean locked;
 
