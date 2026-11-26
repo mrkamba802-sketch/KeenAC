@@ -399,7 +399,7 @@ public final class NoFallCheck implements Listener {
         BoundingBox box = player.getBoundingBox();
         double feetY = box.getMinY();
         BoundingBox probe = new BoundingBox(
-                box.getMinX() + 0.01, feetY - 0.06, box.getMinZ() + 0.01,
+                box.getMinX() + 0.01, feetY - 0.01, box.getMinZ() + 0.01,
                 box.getMaxX() - 0.01, feetY + 0.001, box.getMaxZ() - 0.01);
 
         int minX = floor(probe.getMinX());
