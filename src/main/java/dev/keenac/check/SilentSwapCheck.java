@@ -33,7 +33,6 @@ public final class SilentSwapCheck {
     private volatile long inventoryMaxCycleNanos = 180_000_000L;
     private volatile long observationWindowNanos = 1_600_000_000L;
     private volatile long swingCorrelationNanos = 140_000_000L;
-    private volatile long alertCooldownNanos = 5_000_000_000L;
     private volatile int requiredCycles = 2;
     private volatile int maxPingMs = 250;
     private volatile long reviewDelayTicks = 3L;
@@ -56,9 +55,6 @@ public final class SilentSwapCheck {
                 * 1_000_000L;
         swingCorrelationNanos = Math.max(20L,
                 plugin.getConfig().getLong("checks.silent-swap.swing-correlation-ms", 140L))
-                * 1_000_000L;
-        alertCooldownNanos = Math.max(1000L,
-                plugin.getConfig().getLong("checks.silent-swap.alert-cooldown-ms", 5000L))
                 * 1_000_000L;
         requiredCycles = Math.max(2,
                 plugin.getConfig().getInt("checks.silent-swap.required-cycles", 2));
@@ -373,13 +369,11 @@ public final class SilentSwapCheck {
                 cycleQueue.removeFirst();
             }
 
-            if (cycleQueue.size() < requiredCycles
-                    || now - state.lastAlertNanos < alertCooldownNanos) {
+            if (cycleQueue.size() < requiredCycles) {
                 return;
             }
 
             cycleQueue.clear();
-            state.lastAlertNanos = now;
             state.violationLevel++;
             violationLevel = state.violationLevel;
         }
@@ -436,7 +430,6 @@ public final class SilentSwapCheck {
     private static final class PlayerState {
         private int selectedSlot = -1;
         private int violationLevel;
-        private long lastAlertNanos;
         private long lastMainHandSwingNanos;
         private long generation;
         private PendingSwitch pendingSwitch;
