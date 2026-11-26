@@ -39,6 +39,7 @@ public final class NoFallCheck implements Listener {
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastSafePositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastSafePositionAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Double> lastSafeY = new ConcurrentHashMap<>();
     private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
@@ -118,12 +119,18 @@ public final class NoFallCheck implements Listener {
                         episode.falling = true;
                         episode.fallDamageSeen = false;
                         episode.fallStartY = estimatedStartY;
-                        episode.peakY = Math.max(estimatedStartY, location.getY());
-                        episode.lowestY = location.getY();
+                        episode.peakY = Math.max(estimatedStartY,
+                                episode.hasPacketY ? episode.packetPeakY : location.getY());
+                        episode.lowestY = Math.min(location.getY(),
+                                episode.hasPacketY ? episode.packetLowestY : location.getY());
                         episode.startedAtNanos = now;
                         episode.safePosition = safe == null ? null : safe.clone();
                         episode.safePositionAtMillis = lastSafePositionAt.getOrDefault(id, 0L);
                     } else if (episode.falling) {
+                        if (episode.safePosition == null) {
+                            episode.safePosition = copyLocation(lastSafePositions.get(id));
+                            episode.safePositionAtMillis = lastSafePositionAt.getOrDefault(id, 0L);
+                        }
                         episode.peakY = Math.max(episode.peakY, location.getY());
                         episode.lowestY = Math.min(episode.lowestY, location.getY());
                     }
@@ -160,6 +167,10 @@ public final class NoFallCheck implements Listener {
                 if (!episode.landingPending) {
                     lastSafePositions.put(id, location.clone());
                     lastSafePositionAt.put(id, System.currentTimeMillis());
+                    lastSafeY.put(id, location.getY());
+                    episode.packetPeakY = location.getY();
+                    episode.packetLowestY = location.getY();
+                    episode.hasPacketY = false;
                     episode.world = world;
                 }
             }
@@ -193,6 +204,28 @@ public final class NoFallCheck implements Listener {
                 } else {
                     episode.packetPeakY = Math.max(episode.packetPeakY, packetY);
                     episode.packetLowestY = Math.min(episode.packetLowestY, packetY);
+                }
+
+                // Detect the start of descent directly from packet Y. This is
+                // independent of the client onGround bit, including when it is
+                // spoofed true throughout the fall.
+                if (!episode.falling && !episode.landingPending) {
+                    Double groundedY = lastSafeY.get(id);
+                    if (groundedY != null && packetY < groundedY - 0.08) {
+                        episode.episodeId++;
+                        episode.world = null; // filled from Bukkit on the next tick
+                        episode.falling = true;
+                        episode.fallDamageSeen = false;
+                        episode.fallStartY = groundedY;
+                        episode.peakY = Math.max(groundedY, episode.packetPeakY);
+                        episode.lowestY = Math.min(groundedY, episode.packetLowestY);
+                        episode.safePosition = null; // Bukkit Location captured on the main thread
+                        episode.safePositionAtMillis = lastSafePositionAt.getOrDefault(id, 0L);
+                        episode.startedAtNanos = System.nanoTime();
+                    }
+                } else if (episode.falling) {
+                    episode.peakY = Math.max(episode.peakY, packetY);
+                    episode.lowestY = Math.min(episode.lowestY, packetY);
                 }
             }
             if (episode.falling && clientOnGround) {
@@ -443,6 +476,7 @@ public final class NoFallCheck implements Listener {
         violations.remove(id);
         lastSafePositions.remove(id);
         lastSafePositionAt.remove(id);
+        lastSafeY.remove(id);
         applyingSetbacks.remove(id);
     }
 
@@ -451,6 +485,7 @@ public final class NoFallCheck implements Listener {
         violations.clear();
         lastSafePositions.clear();
         lastSafePositionAt.clear();
+        lastSafeY.clear();
         applyingSetbacks.clear();
     }
 
