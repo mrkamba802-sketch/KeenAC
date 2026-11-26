@@ -43,7 +43,7 @@ public final class NoFallCheck implements Listener {
     private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
-    private volatile double minimumFallDistance = 3.0;
+    private volatile double minimumFallDistance = 4.0;
     private volatile boolean setbackEnabled = true;
     private volatile long safePositionMaxAgeMillis = 30_000L;
     private volatile boolean damageEnabled = true;
@@ -294,9 +294,19 @@ public final class NoFallCheck implements Listener {
         if (episode == null) {
             return;
         }
-        // Defer confirmation by one tick. A spoofed ground packet can make
-        // Bukkit emit FALL while the player is still airborne; accept the event
-        // only if the server collision probe confirms support on the next tick.
+        // If Bukkit applied real damage, do not add a second hit even if a
+        // spoofed ground packet caused the event slightly before physical contact.
+        if (!event.isCancelled() && event.getFinalDamage() > 0.0) {
+            synchronized (episode) {
+                if (episode.falling || episode.landingPending) {
+                    episode.fallDamageSeen = true;
+                }
+            }
+            return;
+        }
+
+        // Region/protection plugins may intentionally cancel FALL. Treat that
+        // as a normal landing only when physical support is confirmed next tick.
         long token;
         synchronized (episode) {
             if (!episode.falling && !episode.landingPending) {
