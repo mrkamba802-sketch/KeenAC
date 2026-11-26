@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
@@ -66,7 +67,8 @@ public final class AlertManager {
     }
 
     public void send(String checkName, Player suspect, int violationLevel, String reason) {
-        if (suspect == null || !plugin.getConfig().getBoolean("alerts.enabled", true)) return;
+        if (suspect == null || !plugin.isEnabled()
+                || !plugin.getConfig().getBoolean("alerts.enabled", true)) return;
 
         UUID playerId = suspect.getUniqueId();
         AlertKey key = new AlertKey(playerId, checkName);
@@ -103,14 +105,19 @@ public final class AlertManager {
     }
 
     private void schedulePending(AlertKey key, DeliveryState state, long delayNanos) {
-        state.scheduled = cooldownScheduler.schedule(() -> {
-            if (!plugin.isEnabled()) return;
-            try {
-                Bukkit.getScheduler().runTask(plugin, () -> flushPending(key, state));
-            } catch (IllegalStateException ignored) {
-                // The plugin may be shutting down while a cooldown is expiring.
-            }
-        }, Math.max(1L, delayNanos), TimeUnit.NANOSECONDS);
+        try {
+            state.scheduled = cooldownScheduler.schedule(() -> {
+                if (!plugin.isEnabled()) return;
+                try {
+                    Bukkit.getScheduler().runTask(plugin, () -> flushPending(key, state));
+                } catch (RuntimeException ignored) {
+                    // The plugin may be shutting down while a cooldown is expiring.
+                }
+            }, Math.max(1L, delayNanos), TimeUnit.NANOSECONDS);
+        } catch (RejectedExecutionException ignored) {
+            state.pending = null;
+            state.scheduled = null;
+        }
     }
 
     private void flushPending(AlertKey key, DeliveryState state) {
@@ -161,7 +168,7 @@ public final class AlertManager {
         } else {
             try {
                 Bukkit.getScheduler().runTask(plugin, deliver);
-            } catch (IllegalStateException ignored) {
+            } catch (RuntimeException ignored) {
                 // The plugin may be shutting down before this delivery runs.
             }
         }
