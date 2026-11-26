@@ -130,12 +130,9 @@ public final class NoFallCheck implements Listener {
         long candidateSafePositionAt = 0L;
 
         synchronized (state) {
-            // A server-confirmed landing or a damage-exempt surface ends the
-            // current descent. The tracked packet height is kept only in air.
-            if (profile.physicallySupported || profile.safeSurface) {
-                state.reset();
-                return;
-            }
+            // Exempt landing surfaces end the review. Physical support is
+            // deliberately not an early return: the final onGround packet may
+            // arrive after collision support has already updated.
 
             if (hasPosition && Double.isFinite(packetY)) {
                 if (!state.hasPacketY) {
@@ -156,7 +153,11 @@ public final class NoFallCheck implements Listener {
             }
 
             if (!clientOnGround) {
-                state.resetCandidateOnly();
+                if (profile.physicallySupported) {
+                    state.reset();
+                } else {
+                    state.resetCandidateOnly();
+                }
                 return;
             }
 
@@ -165,7 +166,11 @@ public final class NoFallCheck implements Listener {
             double observedFallDistance = Math.max(profile.fallDistance, packetFallDistance);
             boolean candidateFall = observedFallDistance > minimumFallDistance;
             if (!candidateFall) {
-                state.resetCandidateOnly();
+                if (profile.physicallySupported) {
+                    state.reset();
+                } else {
+                    state.resetCandidateOnly();
+                }
                 return;
             }
 
@@ -194,6 +199,14 @@ public final class NoFallCheck implements Listener {
                 candidateSafePositionAt = state.candidateSafePositionAt;
                 state.resetCandidateOnly();
                 shouldConfirm = true;
+            }
+
+            // Clear the descent baseline only after evaluating the landing
+            // packet, so a final spoofed onGround claim is not discarded.
+            if (profile.physicallySupported) {
+                state.hasPacketY = false;
+                state.lastPacketY = 0.0;
+                state.peakPacketY = 0.0;
             }
         }
 
