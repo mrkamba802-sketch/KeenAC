@@ -26,7 +26,6 @@ checks:
     required-hits: 3
     window-ms: 1500
     flag-duration-ms: 900
-    alert-cooldown-ms: 5000
     max-distance: 5.0
 
   wall-hit:
@@ -61,6 +60,8 @@ checks:
     max-move-distance: 0.08
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
     elytra-grace-ms: 2500
+    # Ignore stale/teleport movement samples after an Ender Pearl landing.
+    pearl-grace-ms: 1500
 
   ghost-menu:
     enabled: true
@@ -91,7 +92,6 @@ checks:
     # Hotbar keys (0-8) and offhand key (40) are counted. Alerts are advisory.
     required-swaps: 8
     window-ms: 1500
-    alert-cooldown-ms: 5000
 
   silent-swap:
     enabled: true
@@ -107,7 +107,6 @@ checks:
     # Delay the review briefly so a same-batch / slightly delayed swing packet can arrive.
     review-delay-ticks: 3
     max-ping-ms: 250
-    alert-cooldown-ms: 5000
     # Inventory click/move packets are excluded; only hotbar slot/action packet sequences count.
     log-context: true
 
@@ -154,7 +153,6 @@ checks:
     # Consecutive over-limit smoothed windows required to confirm a violation.
     confirm-samples: 2
     max-ping-ms: 250
-    alert-cooldown-ms: 1500
     log-context: true
     setback:
       enabled: true
@@ -179,7 +177,6 @@ checks:
     minimum-segment-distance: 1.0
     maximum-segment-distance: 12.0
     yaw-turn-tolerance-degrees: 28.0
-    alert-cooldown-ms: 15000
     # Advisory only: Baritone is not directly identifiable from movement packets.
     # This check alerts on repeated automated-looking ground-navigation patterns.
     log-context: true
@@ -189,7 +186,6 @@ checks:
     # Advisory placement consistency review only; no actions are cancelled.
     threshold: 5
     violation-decay: 0.05
-    cooldown-ms: 1000
     max-ping-ms: 250
 
   aim:
@@ -206,7 +202,6 @@ checks:
     stable-angle-deviation: 0.65
     # Skip unreliable samples during high-latency play.
     max-ping-ms: 250
-    alert-cooldown-ms: 5000
 
   reach:
     enabled: true
@@ -220,7 +215,6 @@ checks:
     # Repeated suspicious attack packets are required before alerting/cancelling.
     required-hits: 3
     window-ms: 2500
-    alert-cooldown-ms: 3000
     cancel-hits: true
 
   inv-hit:
@@ -233,8 +227,9 @@ checks:
 
 alerts:
   enabled: true
-  # Minimum delay between alerts for the same player and check.
-  # Set to 3 to use the originally requested three-second interval.
+  # Real-time minimum delay between alerts for the same player and check.
+  # Suppressed one-shot alerts are queued and delivered after this interval.
+  # The x1, x2, x3 sequence advances only when the alert is actually sent.
   delay-seconds: 3
   # Send alerts to console as well as opted-in staff.
   console: true
