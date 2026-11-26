@@ -309,7 +309,10 @@ public final class MotionCheck implements Listener {
         UUID id = player.getUniqueId();
         int vl = elytraViolationLevels.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + one);
-        plugin.getAlertManager().send("ElytraSpeed", player, vl);
+        plugin.getAlertManager().send("ElytraSpeed", player, vl,
+                String.format(java.util.Locale.ROOT,
+                        "Average Elytra speed %.2f blocks/sec exceeded the configured limit %.2f.",
+                        bps, threshold));
         if (plugin.getConfig().getBoolean("checks.elytra-speed.log-context", true)) {
             plugin.getLogger().warning(String.format(java.util.Locale.ROOT,
                     "ElytraSpeed review for %s (VL=%d, speed=%.2f BPS, limit=%.2f BPS)",
