@@ -445,7 +445,6 @@ public final class GhostMenuCheck implements Listener {
         externalMovementGraceUntil.clear();
         violationLevels.clear();
         packetPositions.values().forEach(ConcurrentLinkedQueue::clear);
-        lastFreezeAttemptAlert.clear();
         lastGroundedPositions.clear();
         lastGroundedAt.clear();
         applyingSetbacks.clear();
