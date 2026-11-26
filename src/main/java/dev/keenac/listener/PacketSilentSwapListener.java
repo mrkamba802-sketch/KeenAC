@@ -7,6 +7,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.InteractionHand;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAttack;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPunch;
@@ -43,10 +44,23 @@ public final class PacketSilentSwapListener extends PacketListenerAbstract {
             return;
         }
 
-        // Inventory changes are not SilentSwap evidence. Discard any incomplete
-        // slot/action candidate and do not count clicks or moved stacks.
-        if (type == PacketType.Play.Client.CLICK_WINDOW
-                || type == PacketType.Play.Client.CREATIVE_INVENTORY_ACTION) {
+        // Window-0 SWAP to the currently selected hotbar key is a distinct
+        // inventory-based silent-swap path. Other inventory clicks only reset
+        // partial evidence and can never raise a SilentSwap alert.
+        if (type == PacketType.Play.Client.CLICK_WINDOW) {
+            WrapperPlayClientClickWindow click = new WrapperPlayClientClickWindow(event);
+            if (click.getWindowId() == 0
+                    && click.getWindowClickType()
+                    == WrapperPlayClientClickWindow.WindowClickType.SWAP) {
+                check.recordInventorySwap(playerId, click.getWindowId(),
+                        click.getSlot(), click.getButton());
+            } else {
+                check.recordInventoryMutation(playerId);
+            }
+            return;
+        }
+
+        if (type == PacketType.Play.Client.CREATIVE_INVENTORY_ACTION) {
             check.recordInventoryMutation(playerId);
             return;
         }
