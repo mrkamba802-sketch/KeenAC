@@ -387,10 +387,12 @@ public final class MotionCheck implements Listener {
     private void refreshMotionPacketSettings() {
         // Clamp legacy config values too: an older config.yml may still carry
         // the previous, much more permissive 1.30 / 0.55 defaults.
+        // Keep only a small margin above the estimated vanilla speed. Packet
+        // samples are averaged over a window, so large legacy buffers are unsafe.
         motionSpeedMultiplier = Math.max(1.0,
-                Math.min(1.08, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.06)));
+                Math.min(1.06, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.025)));
         motionSpeedBufferBps = Math.max(0.0,
-                Math.min(0.15, plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.12)));
+                Math.min(0.10, plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.04)));
         motionSpeedConfirmSamples = Math.max(2,
                 plugin.getConfig().getInt("checks.motion.speed.confirm-samples", 3));
         int sampleWindowMs = Math.max(350,
@@ -636,14 +638,15 @@ public final class MotionCheck implements Listener {
         Material surface = location.clone().subtract(0.0, 0.2, 0.0).getBlock().getType();
         String name = surface.name();
         if (surface == Material.BLUE_ICE) {
-            return 1.02;
+            // Slippery blocks preserve horizontal momentum longer than ordinary ground.
+            return 1.08;
         }
         if (name.contains("ICE")) {
-            return 0.97;
+            return 1.04;
         }
         if (name.contains("SLIME")) {
-            // Slime is slower to walk on; airborne bounce movement has its own margin.
-            return player.isOnGround() ? 0.70 : 1.10;
+            // Preserve a modest allowance for momentum and bounce transitions.
+            return player.isOnGround() ? 1.02 : 1.14;
         }
         if (name.contains("HONEY")) {
             return 0.58;
