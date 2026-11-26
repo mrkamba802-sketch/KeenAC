@@ -23,27 +23,61 @@ public final class WallHitCheck implements Listener {
 
     public WallHitCheck(KeenAC plugin) { this.plugin = plugin; }
 
+    /**
+     * The violation signal comes from a serverbound attack packet. This Bukkit
+     * event is retained only as a final server-side hit-cancellation safeguard.
+     */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (!(event.getDamager() instanceof Player attacker)) return;
-        if (!plugin.getConfig().getBoolean("checks.wall-hit.enabled", true)) return;
-
-        Entity target = event.getEntity();
-        if (attacker.getWorld() != target.getWorld() || canSeeAnyPart(attacker, target)) return;
-
-        if (plugin.getConfig().getBoolean("checks.wall-hit.cancel-hits", true)) {
+        if (!plugin.getConfig().getBoolean("checks.wall-hit.enabled", true)
+                || !plugin.getConfig().getBoolean("checks.wall-hit.cancel-hits", true)) return;
+        if (attacker.getWorld() != event.getEntity().getWorld()
+                || !canSeeAnyPart(attacker, event.getEntity())) {
             event.setCancelled(true);
         }
+    }
 
-        UUID id = attacker.getUniqueId();
-        int vl = violations.merge(id, 1, Integer::sum);
+    /** Called on the primary thread after a PacketEvents ATTACK packet is decoded. */
+    public void handlePacketAttack(UUID attackerId, int targetEntityId) {
+        if (!plugin.getConfig().getBoolean("checks.wall-hit.enabled", true)) return;
+        Player attacker = org.bukkit.Bukkit.getPlayer(attackerId);
+        if (attacker == null || !attacker.isOnline() || attacker.isDead()) return;
+
+        Entity target = null;
+        for (Entity nearby : attacker.getNearbyEntities(8.0, 8.0, 8.0)) {
+            if (nearby.getEntityId() == targetEntityId) {
+                target = nearby;
+                break;
+            }
+        }
+        if (target == null || target.getWorld() != attacker.getWorld()
+                || canSeeAnyPart(attacker, target)) {
+            return;
+        }
+
+        int vl = violations.merge(attackerId, 1, (current, one) ->
+                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
         long now = System.currentTimeMillis();
-        long cooldown = Math.max(0L, plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
-        long previous = lastAlertMillis.getOrDefault(id, 0L);
+        long cooldown = Math.max(0L,
+                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
+        long previous = lastAlertMillis.getOrDefault(attackerId, 0L);
         if (now - previous >= cooldown) {
             plugin.getAlertManager().send("WallHit", attacker, vl);
-            lastAlertMillis.put(id, now);
+            lastAlertMillis.put(attackerId, now);
         }
+    }
+
+    @EventHandler
+    public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        violations.remove(id);
+        lastAlertMillis.remove(id);
+    }
+
+    public void clearAll() {
+        violations.clear();
+        lastAlertMillis.clear();
     }
 
     /*
