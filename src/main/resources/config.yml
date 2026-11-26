@@ -52,15 +52,16 @@ checks:
     # High packet-measured horizontal speed is the primary signal.
     # Sprint state is not required because some clients report it inconsistently while a GUI is open.
     require-sprint: false
-    minimum-horizontal-speed: 3.4
-    required-samples: 6
-    required-duration-ms: 350
-    required-distance: 1.2
+    minimum-horizontal-speed: 1.8
+    required-samples: 4
+    required-duration-ms: 250
+    required-distance: 0.65
     sample-window-ms: 1200
     max-ping-ms: 250
     # The E-inventory is client-side; detection is best-effort after window-0 clicks.
     personal-inventory-window-ms: 2200
     alert-cooldown-ms: 5000
+    log-context: true
 
   auto-swap:
     enabled: true
@@ -110,7 +111,9 @@ checks:
     enabled: true
     # Ignore short falls and require repeated client onGround claims.
     minimum-fall-distance: 3.0
-    required-packets: 2
+    # One confirmed onGround claim is enough once packet descent exceeds the limit;
+    # real fall damage is checked on the following server tick before any action.
+    required-packets: 1
     packet-window-ms: 750
     max-ping-ms: 250
     alert-cooldown-ms: 2000
