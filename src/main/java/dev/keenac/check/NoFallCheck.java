@@ -2,8 +2,10 @@ package dev.keenac.check;
 
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
@@ -16,35 +18,32 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
-import org.bukkit.GameMode;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.Vector;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import org.bukkit.util.Vector;
-import org.bukkit.util.BoundingBox;
 
 /**
- * PacketEvents NoFall signal. It compares the client's onGround bit with a
- * main-thread snapshot of the server's fall state, then confirms on the main
- * thread so a legitimate landing is not treated as spoofing.
+ * NoFall detection based on the server-observed fall trajectory and the
+ * expected vanilla FALL damage event. Client onGround packets are recorded
+ * as supporting evidence, but never used as the sole detection signal.
  */
 public final class NoFallCheck implements Listener {
+    private static final long LANDING_CONFIRM_TICKS = 3L;
+    private static final long FALL_EVENT_LOOKBACK_NANOS = 350_000_000L;
+
     private final KeenAC plugin;
-    private final Map<UUID, NoFallProfile> profiles = new ConcurrentHashMap<>();
-    private final Map<UUID, PacketState> packetStates = new ConcurrentHashMap<>();
+    private final Map<UUID, FallEpisode> episodes = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violations = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastSafePositions = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastSafePositionAt = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastFallDamageNanos = new ConcurrentHashMap<>();
     private final Set<UUID> applyingSetbacks = ConcurrentHashMap.newKeySet();
 
     private volatile boolean enabled = true;
-    private volatile int maxPing = 250;
     private volatile double minimumFallDistance = 3.0;
-    private volatile int requiredPackets = 2;
-    private volatile long packetWindowNanos = 750_000_000L;
     private volatile long alertCooldownNanos = 2_000_000_000L;
     private volatile boolean setbackEnabled = true;
     private volatile long safePositionMaxAgeMillis = 30_000L;
@@ -54,16 +53,14 @@ public final class NoFallCheck implements Listener {
         this.plugin = plugin;
     }
 
-    /** Refresh all Bukkit/world data on the server thread. */
+    /**
+     * Called once per server tick. The fall origin is preserved across the
+     * entire airborne interval; landing does not overwrite it before review.
+     */
     public void tick() {
         enabled = plugin.getConfig().getBoolean("checks.no-fall.enabled", true);
-        maxPing = Math.max(50, plugin.getConfig().getInt("checks.no-fall.max-ping-ms", 250));
         minimumFallDistance = Math.max(2.0,
                 plugin.getConfig().getDouble("checks.no-fall.minimum-fall-distance", 3.0));
-        requiredPackets = Math.max(2,
-                plugin.getConfig().getInt("checks.no-fall.required-packets", 2));
-        packetWindowNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.no-fall.packet-window-ms", 750L)) * 1_000_000L;
         alertCooldownNanos = Math.max(250L,
                 plugin.getConfig().getLong("checks.no-fall.alert-cooldown-ms", 2000L)) * 1_000_000L;
         setbackEnabled = plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true);
@@ -72,329 +69,247 @@ public final class NoFallCheck implements Listener {
         damageEnabled = plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true);
 
         if (!enabled) {
-            // Do not retain pending suspicions across a disabled/re-enabled check.
-            profiles.clear();
-            packetStates.clear();
+            episodes.clear();
             return;
         }
 
-        var online = Bukkit.getOnlinePlayers().stream()
+        long now = System.nanoTime();
+        Set<UUID> online = Bukkit.getOnlinePlayers().stream()
                 .map(Player::getUniqueId)
                 .collect(java.util.stream.Collectors.toSet());
+
         for (Player player : Bukkit.getOnlinePlayers()) {
+            UUID id = player.getUniqueId();
             Location location = player.getLocation();
+            World world = location.getWorld();
             boolean exemptMode = !player.isOnline() || !player.isValid() || player.isDead()
                     || player.isInsideVehicle() || player.isFlying() || player.isGliding()
                     || player.isSwimming() || player.isRiptiding() || player.isInWater()
+                    || player.isInLava()
                     || player.getGameMode() == GameMode.CREATIVE
                     || player.getGameMode() == GameMode.SPECTATOR
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION);
-            boolean safeSurface = isSafeLandingSurface(location);
-            boolean physicallySupported = hasSolidSupport(player);
-            UUID id = player.getUniqueId();
-            if (physicallySupported && !safeSurface && !exemptMode) {
-                lastSafePositions.put(id, location.clone());
-                lastSafePositionAt.put(id, System.currentTimeMillis());
+
+            FallEpisode episode = episodes.computeIfAbsent(id, ignored -> new FallEpisode());
+            if (exemptMode) {
+                synchronized (episode) {
+                    episode.resetTracking();
+                }
+                continue;
             }
-            profiles.put(id, new NoFallProfile(
-                    enabled && !exemptMode,
-                    physicallySupported,
-                    safeSurface,
-                    player.getPing(),
-                    player.getFallDistance(),
-                    location.getY(),
-                    location.getWorld(),
-                    copyLocation(lastSafePositions.get(id)),
-                    lastSafePositionAt.getOrDefault(id, 0L)));
+
+            boolean supported = hasSolidSupport(player);
+            boolean safeLanding = supported && isSafeLandingSurface(location);
+
+            synchronized (episode) {
+                if (episode.world != null && episode.world != world) {
+                    episode.resetTracking();
+                }
+
+                if (!supported) {
+                    if (!episode.falling && !episode.landingPending) {
+                        Location safe = lastSafePositions.get(id);
+                        double estimatedStartY = safe != null && safe.getWorld() == world
+                                ? safe.getY()
+                                : location.getY() + Math.max(0.0, player.getFallDistance());
+
+                        episode.episodeId++;
+                        episode.world = world;
+                        episode.falling = true;
+                        episode.fallDamageSeen = false;
+                        episode.fallStartY = estimatedStartY;
+                        episode.peakY = Math.max(estimatedStartY, location.getY());
+                        episode.lowestY = location.getY();
+                        episode.startedAtNanos = now;
+                        episode.safePosition = safe == null ? null : safe.clone();
+                        episode.safePositionAtMillis = lastSafePositionAt.getOrDefault(id, 0L);
+                    } else if (episode.falling) {
+                        episode.peakY = Math.max(episode.peakY, location.getY());
+                        episode.lowestY = Math.min(episode.lowestY, location.getY());
+                    }
+                    continue;
+                }
+
+                if (episode.falling) {
+                    double measuredFall = Math.max(
+                            player.getFallDistance(),
+                            Math.max(0.0, episode.peakY - Math.min(episode.lowestY, location.getY())));
+                    episode.falling = false;
+
+                    if (!safeLanding && measuredFall >= minimumFallDistance) {
+                        episode.landingPending = true;
+                        episode.landingAtNanos = now;
+                        episode.landingFallDistance = measuredFall;
+                        episode.landingLocation = location.clone();
+                        long token = ++episode.episodeId;
+                        Location safe = episode.safePosition == null
+                                ? copyLocation(lastSafePositions.get(id))
+                                : episode.safePosition.clone();
+                        long safeAt = episode.safePositionAtMillis;
+                        World landingWorld = world;
+
+                        Bukkit.getScheduler().runTaskLater(plugin, () -> confirmLanding(
+                                id, token, landingWorld, measuredFall, safe, safeAt, now),
+                                LANDING_CONFIRM_TICKS);
+                    } else {
+                        episode.resetTracking();
+                    }
+                }
+
+                // Do not replace the fall origin while a landing is awaiting
+                // the vanilla FALL event.
+                if (!episode.landingPending) {
+                    lastSafePositions.put(id, location.clone());
+                    lastSafePositionAt.put(id, System.currentTimeMillis());
+                    episode.world = world;
+                }
+            }
         }
-        profiles.keySet().removeIf(id -> !online.contains(id));
-        packetStates.keySet().removeIf(id -> !online.contains(id));
+
+        episodes.keySet().removeIf(id -> !online.contains(id));
         violations.keySet().removeIf(id -> !online.contains(id));
         lastSafePositions.keySet().removeIf(id -> !online.contains(id));
         lastSafePositionAt.keySet().removeIf(id -> !online.contains(id));
-        lastFallDamageNanos.keySet().removeIf(id -> !online.contains(id));
     }
 
     /**
-     * Called for every inbound player-flying packet, including rotation-only
-     * packets. A candidate is only alerted if the server has not actually
-     * landed the player and the location is not a fall-damage-exempt surface.
+     * PacketEvents still feeds the client ground flag and Y coordinate. They
+     * are retained for diagnostics and correlation, not used to discard a
+     * landing candidate when the cheat only spoofs the final landing packet.
      */
     public void recordPacketOnGround(UUID id, boolean clientOnGround,
                                      boolean hasPosition, double packetY) {
-        NoFallProfile profile = profiles.get(id);
-        if (!enabled || profile == null || !profile.eligible || profile.ping > maxPing) {
-            packetStates.remove(id);
+        if (!enabled || id == null) {
             return;
         }
-
-        long now = System.nanoTime();
-        PacketState state = packetStates.computeIfAbsent(id, ignored -> new PacketState());
-        boolean shouldSchedule = false;
-        long episodeId = 0L;
-        double candidateDistance = 0.0;
-        long suspectedAtNanos = 0L;
-        Location candidateSafePosition = null;
-        long candidateSafePositionAt = 0L;
-
-        synchronized (state) {
-            if (profile.safeSurface) {
-                state.resetForGround();
-                return;
-            }
-
+        FallEpisode episode = episodes.computeIfAbsent(id, ignored -> new FallEpisode());
+        synchronized (episode) {
+            episode.lastClientOnGround = clientOnGround;
+            episode.lastPacketNanos = System.nanoTime();
             if (hasPosition && Double.isFinite(packetY)) {
-                if (!state.hasPacketY) {
-                    double safeY = profile.lastSafePosition != null
-                            && profile.lastSafePosition.getWorld() == profile.world
-                            ? profile.lastSafePosition.getY() : profile.currentY;
-                    state.peakPacketY = Math.max(Math.max(packetY, safeY), profile.currentY);
-                    state.lastPacketY = packetY;
-                    state.hasPacketY = true;
+                if (!episode.hasPacketY) {
+                    episode.packetPeakY = packetY;
+                    episode.packetLowestY = packetY;
+                    episode.hasPacketY = true;
                 } else {
-                    state.peakPacketY = Math.max(
-                            Math.max(state.peakPacketY, packetY), profile.currentY);
-                    state.lastPacketY = packetY;
-                }
-            } else if (state.hasPacketY) {
-                state.peakPacketY = Math.max(state.peakPacketY, profile.currentY);
-                state.lastPacketY = Math.min(state.lastPacketY, profile.currentY);
-            }
-
-            state.lastPacketNanos = now;
-            state.lastClientOnGround = clientOnGround;
-
-            // A grounded packet after a long descent is reviewed instead of being
-            // discarded immediately. A genuine landing generates a FALL event;
-            // a NoFall spoof commonly suppresses that event while asserting onGround.
-            if (profile.physicallySupported && !clientOnGround) {
-                state.resetForGround();
-                return;
-            }
-            if (profile.physicallySupported && clientOnGround) {
-                if (state.confirmationPending) {
-                    return;
-                }
-                if (state.violationHandled) {
-                    state.resetForGround();
-                    return;
-                }
-                double landingDistance = observedFallDistance(profile, state);
-                if (landingDistance <= minimumFallDistance) {
-                    state.resetForGround();
-                    return;
-                }
-                state.resetCandidateOnly();
-                state.firstClaimNanos = now;
-                state.candidateFallDistance = landingDistance;
-                state.suspectedAtNanos = now;
-                state.candidateSafePosition = copyLocation(profile.lastSafePosition);
-                state.candidateSafePositionAt = profile.lastSafePositionAt;
-                state.claims = requiredPackets;
-                state.confirmationPending = true;
-                episodeId = state.episodeId;
-                candidateDistance = landingDistance;
-                suspectedAtNanos = now;
-                candidateSafePosition = copyLocation(profile.lastSafePosition);
-                candidateSafePositionAt = profile.lastSafePositionAt;
-                shouldSchedule = true;
-            } else if (!clientOnGround) {
-                // Cancel delayed punishment as soon as the client stops spoofing,
-                // but keep the tracked vertical trajectory for this fall.
-                state.resetCandidateOnly();
-                state.confirmationPending = false;
-                return;
-            } else {
-                // Require repeated onGround packets while the independent server
-                // collision check says the player is airborne.
-                if (state.violationHandled || state.confirmationPending) {
-                    return;
-                }
-
-                double observedFallDistance = observedFallDistance(profile, state);
-                if (observedFallDistance <= minimumFallDistance) {
-                    state.resetCandidateOnly();
-                    return;
-                }
-
-                if (state.firstClaimNanos == 0L
-                        || now - state.firstClaimNanos > packetWindowNanos) {
-                    state.resetCandidateOnly();
-                    state.firstClaimNanos = now;
-                    state.candidateFallDistance = observedFallDistance;
-                    state.suspectedAtNanos = now;
-                    state.candidateSafePosition = copyLocation(profile.lastSafePosition);
-                    state.candidateSafePositionAt = profile.lastSafePositionAt;
-                    state.claims = 1;
-                } else {
-                    state.candidateFallDistance = Math.max(
-                            state.candidateFallDistance, observedFallDistance);
-                    state.claims++;
-                }
-
-                if (state.claims >= requiredPackets) {
-                    state.confirmationPending = true;
-                    episodeId = state.episodeId;
-                    candidateDistance = state.candidateFallDistance;
-                    suspectedAtNanos = state.suspectedAtNanos;
-                    candidateSafePosition = copyLocation(state.candidateSafePosition);
-                    candidateSafePositionAt = state.candidateSafePositionAt;
-                    shouldSchedule = true;
+                    episode.packetPeakY = Math.max(episode.packetPeakY, packetY);
+                    episode.packetLowestY = Math.min(episode.packetLowestY, packetY);
                 }
             }
-        }
-
-        if (shouldSchedule) {
-            final long token = episodeId;
-            final double fallDistance = candidateDistance;
-            final long suspectedAt = suspectedAtNanos;
-            final Location safePosition = candidateSafePosition;
-            final long safePositionAt = candidateSafePositionAt;
-            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmViolation(
-                    id, token, fallDistance, profile.world, suspectedAt,
-                    safePosition, safePositionAt), 2L);
+            if (episode.falling && clientOnGround) {
+                episode.clientGroundClaims++;
+            }
         }
     }
 
     /**
-     * Confirms one suspicion per fall episode. The client must still claim
-     * onGround; damage is resolved at landing so the full fall height is used.
+     * A genuine vanilla fall event is the strongest evidence that damage was
+     * not suppressed. Cancelled events are also recorded to avoid penalizing
+     * region-protection or other plugins that intentionally cancel damage.
      */
-    private void confirmViolation(UUID id, long episodeId, double fallDistance,
-                                  org.bukkit.World packetWorld, long suspectedAtNanos,
-                                  Location safePosition, long safePositionAtMillis) {
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onFallDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)
+                || event.getCause() != EntityDamageEvent.DamageCause.FALL) {
+            return;
+        }
+
+        FallEpisode episode = episodes.get(player.getUniqueId());
+        if (episode == null) {
+            return;
+        }
+        synchronized (episode) {
+            if (episode.falling || episode.landingPending) {
+                episode.fallDamageSeen = true;
+                episode.lastFallDamageNanos = System.nanoTime();
+            }
+        }
+    }
+
+    private void confirmLanding(UUID id, long episodeId, World landingWorld,
+                                double measuredFallDistance, Location safePosition,
+                                long safePositionAtMillis, long landingAtNanos) {
         Player player = Bukkit.getPlayer(id);
-        PacketState state = packetStates.get(id);
-        if (player == null || !player.isOnline() || state == null
+        FallEpisode episode = episodes.get(id);
+        if (player == null || !player.isOnline() || player.isDead() || episode == null
                 || !plugin.getConfig().getBoolean("checks.no-fall.enabled", true)
-                || player.getWorld() != packetWorld
-                || player.isInsideVehicle() || player.isFlying() || player.isGliding()
-                || player.isSwimming() || player.isRiptiding() || player.isInWater()
-                || player.getGameMode() == GameMode.CREATIVE
-                || player.getGameMode() == GameMode.SPECTATOR
-                || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
-                || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)
-                || isSafeLandingSurface(player.getLocation())) {
-            cancelPending(state, episodeId);
-            return;
-        }
-
-        synchronized (state) {
-            if (state.episodeId != episodeId || !state.confirmationPending
-                    || !state.lastClientOnGround || state.violationHandled
-                    || System.nanoTime() - state.lastPacketNanos > packetWindowNanos) {
-                cancelPending(state, episodeId);
-                return;
-            }
-        }
-
-        long now = System.nanoTime();
-        long vanillaFallDamageAt = lastFallDamageNanos.getOrDefault(id, 0L);
-        if (vanillaFallDamageAt >= suspectedAtNanos - 100_000_000L
-                && vanillaFallDamageAt <= now) {
-            synchronized (state) {
-                if (state.episodeId == episodeId) {
-                    state.violationHandled = true;
-                    state.confirmationPending = false;
-                    state.resetCandidateOnly();
-                }
-            }
-            return;
-        }
-
-        // Keep following the vertical trajectory until it reaches a real
-        // landing. This preserves the full height on large drops instead of
-        // applying only the first few blocks of damage mid-fall.
-        if (!hasSolidSupport(player)
-                && now - suspectedAtNanos < MAX_CONFIRMATION_WAIT_NANOS) {
-            synchronized (state) {
-                if (state.episodeId != episodeId || !state.confirmationPending
-                        || !state.lastClientOnGround || state.violationHandled) {
-                    return;
-                }
-                double currentY = player.getLocation().getY();
-                double packetDrop = state.hasPacketY
-                        ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, currentY))
-                        : 0.0;
-                state.candidateFallDistance = Math.max(state.candidateFallDistance, packetDrop);
-            }
-            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmViolation(
-                    id, episodeId, fallDistance, packetWorld, suspectedAtNanos,
-                    safePosition, safePositionAtMillis), 2L);
+                || player.getWorld() != landingWorld) {
+            clearPending(episode, episodeId);
             return;
         }
 
         int vl;
-        double confirmedFallDistance;
-        synchronized (state) {
-            if (state.episodeId != episodeId || !state.confirmationPending
-                    || !state.lastClientOnGround || state.violationHandled) {
+        double finalFallDistance;
+        synchronized (episode) {
+            if (episode.episodeId != episodeId || !episode.landingPending) {
                 return;
             }
-            double currentY = player.getLocation().getY();
-            double packetDrop = state.hasPacketY
-                    ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, currentY))
-                    : 0.0;
-            double anchoredDrop = safePosition != null && safePosition.getWorld() == player.getWorld()
-                    ? Math.max(0.0, safePosition.getY() - currentY) : 0.0;
-            confirmedFallDistance = Math.max(Math.max(fallDistance, state.candidateFallDistance),
-                    Math.max(player.getFallDistance(), Math.max(packetDrop, anchoredDrop)));
-            state.confirmationPending = false;
-            state.violationHandled = true;
-            state.resetCandidateOnly();
+
+            boolean vanillaDamageObserved = episode.fallDamageSeen
+                    || episode.lastFallDamageNanos >= landingAtNanos - FALL_EVENT_LOOKBACK_NANOS;
+            if (vanillaDamageObserved) {
+                episode.resetTracking();
+                lastSafePositions.put(id, player.getLocation().clone());
+                lastSafePositionAt.put(id, System.currentTimeMillis());
+                return;
+            }
+
+            // Use the complete server-observed drop, not the client's
+            // fallDistance field, which the NoFall modification may spoof.
+            double serverDrop = safePosition != null && safePosition.getWorld() == landingWorld
+                    ? Math.max(0.0, safePosition.getY() - landingPositionY(episode, measuredFallDistance))
+                    : measuredFallDistance;
+            finalFallDistance = Math.max(measuredFallDistance, serverDrop);
+            episode.landingPending = false;
+            episode.falling = false;
+            episode.violationHandled = true;
             vl = violations.merge(id, 1, (current, one) ->
                     current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
         }
 
         boolean setbackApplied = applySetback(player, safePosition, safePositionAtMillis);
-        // Damage scales with the full measured drop (vanilla formula: ceil(height - 3)).
-        double appliedDamage = applyFallDamage(player, confirmedFallDistance);
+        double appliedDamage = applyFallDamage(player, finalFallDistance);
 
-        if (now - state.lastAlertNanos >= alertCooldownNanos) {
-            state.lastAlertNanos = now;
+        long now = System.nanoTime();
+        if (now - episode.lastAlertNanos >= alertCooldownNanos) {
+            episode.lastAlertNanos = now;
             plugin.getAlertManager().send("NoFall", player, vl);
         }
         if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                    "NoFall confirmed for %s (VL=%d, fallDistance=%.2f, setback=%s, damage=%.1f)",
-                    player.getName(), vl, confirmedFallDistance, setbackApplied, appliedDamage));
+                    "NoFall confirmed for %s (VL=%d, fallDistance=%.2f, clientGroundClaims=%d, setback=%s, damage=%.1f)",
+                    player.getName(), vl, finalFallDistance, episode.clientGroundClaims,
+                    setbackApplied, appliedDamage));
+        }
+
+        synchronized (episode) {
+            episode.resetTracking();
         }
     }
 
-    private double observedFallDistance(NoFallProfile profile, PacketState state) {
-        double anchoredDrop = profile.lastSafePosition != null
-                && profile.lastSafePosition.getWorld() == profile.world
-                ? Math.max(0.0, profile.lastSafePosition.getY() - profile.currentY) : 0.0;
-        double packetDrop = state.hasPacketY
-                ? Math.max(0.0, state.peakPacketY - Math.min(state.lastPacketY, profile.currentY))
-                : 0.0;
-        return Math.max(profile.fallDistance, Math.max(anchoredDrop, packetDrop));
+    private double landingPositionY(FallEpisode episode, double fallback) {
+        return episode.landingLocation == null ? fallback : episode.landingLocation.getY();
     }
 
-    private void cancelPending(PacketState state, long episodeId) {
-        if (state == null) {
+    private void clearPending(FallEpisode episode, long episodeId) {
+        if (episode == null) {
             return;
         }
-        synchronized (state) {
-            if (state.episodeId == episodeId && !state.violationHandled) {
-                state.confirmationPending = false;
-                state.resetCandidateOnly();
+        synchronized (episode) {
+            if (episode.episodeId == episodeId) {
+                episode.resetTracking();
             }
         }
     }
 
-    /**
-     * Return the player to the last known safe, grounded position. Internal
-     * teleports are excluded from lifecycle cleanup so the NoFall VL persists.
-     */
     private boolean applySetback(Player player, Location safe, long savedAt) {
         if (!setbackEnabled || !plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true)) {
             return false;
         }
         UUID id = player.getUniqueId();
         if (safe == null || safe.getWorld() == null || safe.getWorld() != player.getWorld()
-                || System.currentTimeMillis() - savedAt > safePositionMaxAgeMillis) {
+                || savedAt <= 0L || System.currentTimeMillis() - savedAt > safePositionMaxAgeMillis) {
             return false;
         }
 
@@ -416,16 +331,10 @@ public final class NoFallCheck implements Listener {
         return applied;
     }
 
-    /**
-     * Apply the vanilla-style base fall damage (one point per block beyond
-     * three blocks) when a confirmed NoFall spoof prevented the fall damage.
-     */
+    /** Vanilla-style damage: one point per block beyond three blocks. */
     private double applyFallDamage(Player player, double fallDistance) {
         if (!damageEnabled || !plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true)
-                || player.isDead()) {
-            return 0.0;
-        }
-        if (!Double.isFinite(fallDistance)) {
+                || player.isDead() || !Double.isFinite(fallDistance)) {
             return 0.0;
         }
         double damage = Math.ceil(Math.max(0.0, fallDistance - 3.0));
@@ -437,9 +346,8 @@ public final class NoFallCheck implements Listener {
     }
 
     /**
-     * Detect physical block support independently of the client's onGround bit.
-     * Player#isOnGround can follow movement packet state on some server paths,
-     * which must not be the sole gate for a NoFall review.
+     * Independent collision-shape support probe. This does not trust the
+     * client's onGround flag or Player#isOnGround.
      */
     private boolean hasSolidSupport(Player player) {
         BoundingBox box = player.getBoundingBox();
@@ -472,20 +380,19 @@ public final class NoFallCheck implements Listener {
         return (int) Math.floor(value);
     }
 
+    /** Only inspect the actual landing block, not blocks several blocks below. */
     private boolean isSafeLandingSurface(Location location) {
-        // Inspect the feet block and the next two blocks below. This covers the
-        // short landing window for blocks that cancel/reduce fall damage.
-        for (int quarterBlocks = 0; quarterBlocks <= 8; quarterBlocks++) {
-            Location probe = location.clone().subtract(0.0, quarterBlocks * 0.25, 0.0);
-            Block block = probe.getBlock();
-            Material type = block.getType();
-            if (block.isLiquid()
-                    || (block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged())
-                    || isFallDamageExemptMaterial(type)) {
-                return true;
-            }
-        }
-        return false;
+        Block feet = location.getBlock();
+        Block support = location.clone().subtract(0.0, 0.08, 0.0).getBlock();
+        return isFallDamageExemptBlock(feet)
+                || isFallDamageExemptBlock(support);
+    }
+
+    private boolean isFallDamageExemptBlock(Block block) {
+        Material type = block.getType();
+        return block.isLiquid()
+                || (block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged())
+                || isFallDamageExemptMaterial(type);
     }
 
     private boolean isFallDamageExemptMaterial(Material material) {
@@ -504,14 +411,6 @@ public final class NoFallCheck implements Listener {
                 || name.contains("VINE")
                 || name.equals("LADDER")
                 || name.contains("DRIPLEAF");
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onFallDamage(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player player
-                && event.getCause() == EntityDamageEvent.DamageCause.FALL) {
-            lastFallDamageNanos.put(player.getUniqueId(), System.nanoTime());
-        }
     }
 
     @EventHandler
@@ -544,22 +443,18 @@ public final class NoFallCheck implements Listener {
     }
 
     public void clear(UUID id) {
-        profiles.remove(id);
-        packetStates.remove(id);
+        episodes.remove(id);
         violations.remove(id);
         lastSafePositions.remove(id);
         lastSafePositionAt.remove(id);
-        lastFallDamageNanos.remove(id);
         applyingSetbacks.remove(id);
     }
 
     public void clearAll() {
-        profiles.clear();
-        packetStates.clear();
+        episodes.clear();
         violations.clear();
         lastSafePositions.clear();
         lastSafePositionAt.clear();
-        lastFallDamageNanos.clear();
         applyingSetbacks.clear();
     }
 
@@ -567,55 +462,50 @@ public final class NoFallCheck implements Listener {
         return location == null ? null : location.clone();
     }
 
-    private record NoFallProfile(
-            boolean eligible,
-            boolean physicallySupported,
-            boolean safeSurface,
-            int ping,
-            double fallDistance,
-            double currentY,
-            org.bukkit.World world,
-            Location lastSafePosition,
-            long lastSafePositionAt) { }
-
-    private static final long MAX_CONFIRMATION_WAIT_NANOS = 30_000_000_000L;
-
-    private static final class PacketState {
+    private static final class FallEpisode {
         private long episodeId;
-        private long firstClaimNanos;
-        private long lastAlertNanos;
+        private long startedAtNanos;
+        private long landingAtNanos;
         private long lastPacketNanos;
-        private double candidateFallDistance;
-        private long suspectedAtNanos;
-        private Location candidateSafePosition;
-        private long candidateSafePositionAt;
-        private int claims;
-        private boolean hasPacketY;
-        private double lastPacketY;
-        private double peakPacketY;
-        private boolean lastClientOnGround;
-        private boolean confirmationPending;
+        private long lastFallDamageNanos;
+        private long safePositionAtMillis;
+        private long lastAlertNanos;
+        private double fallStartY;
+        private double peakY;
+        private double lowestY;
+        private double landingFallDistance;
+        private double packetPeakY;
+        private double packetLowestY;
+        private boolean falling;
+        private boolean landingPending;
+        private boolean fallDamageSeen;
         private boolean violationHandled;
+        private boolean lastClientOnGround;
+        private boolean hasPacketY;
+        private int clientGroundClaims;
+        private World world;
+        private Location safePosition;
+        private Location landingLocation;
 
-        private void resetForGround() {
+        private void resetTracking() {
             episodeId++;
-            resetCandidateOnly();
-            hasPacketY = false;
-            lastPacketY = 0.0;
-            peakPacketY = 0.0;
-            lastClientOnGround = false;
-            confirmationPending = false;
+            startedAtNanos = 0L;
+            landingAtNanos = 0L;
+            fallStartY = 0.0;
+            peakY = 0.0;
+            lowestY = 0.0;
+            landingFallDistance = 0.0;
+            packetPeakY = 0.0;
+            packetLowestY = 0.0;
+            falling = false;
+            landingPending = false;
+            fallDamageSeen = false;
             violationHandled = false;
-            lastPacketNanos = 0L;
-        }
-
-        private void resetCandidateOnly() {
-            firstClaimNanos = 0L;
-            candidateFallDistance = 0.0;
-            suspectedAtNanos = 0L;
-            candidateSafePosition = null;
-            candidateSafePositionAt = 0L;
-            claims = 0;
+            hasPacketY = false;
+            clientGroundClaims = 0;
+            world = null;
+            safePosition = null;
+            landingLocation = null;
         }
     }
 }
