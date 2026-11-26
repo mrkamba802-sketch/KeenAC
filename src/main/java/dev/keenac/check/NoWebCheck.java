@@ -33,6 +33,7 @@ public final class NoWebCheck implements Listener {
             new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastPacketLocations = new HashMap<>();
     private final Set<UUID> applyingCorrection = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> correctionThisSample = new java.util.HashSet<>();
     private long serverTick;
 
     public NoWebCheck(KeenAC plugin) {
@@ -84,6 +85,10 @@ public final class NoWebCheck implements Listener {
                 Location to = new Location(player.getWorld(), sample.x, sample.y, sample.z,
                         sample.yaw, sample.pitch);
                 processPacketMovement(player, from, to, sample.atNanos);
+                if (correctionThisSample.remove(id)) {
+                    entry.getValue().clear();
+                    break;
+                }
                 lastPacketLocations.put(id, to.clone());
             }
         }
@@ -305,6 +310,7 @@ public final class NoWebCheck implements Listener {
             applyingCorrection.remove(id);
         }
         lastPacketLocations.put(id, correction.clone());
+        correctionThisSample.add(id);
     }
 
     private void countViolation(Player player, PlayerState state) {
@@ -363,6 +369,7 @@ public final class NoWebCheck implements Listener {
         lastPacketLocations.clear();
         packetPositions.clear();
         applyingCorrection.clear();
+        correctionThisSample.clear();
     }
 
     private record PacketPosition(double x, double y, double z,
