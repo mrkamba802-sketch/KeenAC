@@ -136,9 +136,11 @@ public final class MovementSetbackManager implements Listener {
         player.setVelocity(ZERO_VELOCITY.clone());
         long lockMillis = Math.max(0L,
                 plugin.getConfig().getLong("checks.movement-setback.correction-lock-ms", 120L));
-        correctionLocks.put(id, player.getLocation().clone());
+        Location correctedPosition = player.getLocation().clone();
+        correctionLocks.put(id, correctedPosition.clone());
         correctionLockUntil.put(id, now + lockMillis);
         lastSetbackAt.put(id, now);
+        lastValidLocations.put(id, correctedPosition);
 
         plugin.getLogger().fine("Applied " + safeCheckName(checkName)
                 + " movement rubberband to " + player.getName() + ".");
