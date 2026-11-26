@@ -232,8 +232,8 @@ public final class GhostMenuCheck implements Listener {
                     continue;
                 }
 
-                // A large jump is only suspicious while a real server-side
-                // container is open, not during the post-close grace period.
+                // A large jump is only suspicious while a server-side
+                // container session is active.
                 double verticalDisplacement = state.updateVerticalWindow(
                         sample.y, sample.atNanos);
                 if (state.source == MenuSource.CONTAINER
