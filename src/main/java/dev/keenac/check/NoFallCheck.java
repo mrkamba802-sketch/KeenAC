@@ -226,7 +226,7 @@ public final class NoFallCheck implements Listener {
             final long safePositionAt = candidateSafePositionAt;
             Bukkit.getScheduler().runTaskLater(plugin, () -> confirmViolation(
                     id, token, fallDistance, profile.world, suspectedAt,
-                    safePosition, safePositionAt), 1L);
+                    safePosition, safePositionAt), 2L);
         }
     }
 
