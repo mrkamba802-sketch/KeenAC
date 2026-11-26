@@ -94,19 +94,10 @@ public final class GhostMenuCheck implements Listener {
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getView().getType() != InventoryType.CRAFTING) {
             UUID id = event.getPlayer().getUniqueId();
-            MenuState state = states.get(id);
-            if (state != null && state.closedByCheck
-                    && System.nanoTime() <= state.postCloseUntilNanos) {
-                // Keep a short packet watch alive after the server closes the
-                // GUI, so continued input becomes x4 and triggers the freeze.
-                state.source = MenuSource.POST_CLOSE;
-                state.menuType = "POST_CLOSE";
-                state.graceUntilNanos = 0L;
-                state.lastPacketNanos = 0L;
-                state.verticalWindowStartedNanos = 0L;
-                state.resetMovementWindow();
-            } else {
-                states.remove(id);
+            MenuState state = states.remove(id);
+            // A check-forced close keeps its escalation briefly, but movement
+            // after the GUI is closed is never reviewed as GhostMenu evidence.
+            if (state == null || !state.closedByCheck) {
                 violationLevels.remove(id);
                 lastViolationAt.remove(id);
             }
@@ -172,13 +163,8 @@ public final class GhostMenuCheck implements Listener {
             }
 
             boolean containerOpen = player.getOpenInventory().getType() != InventoryType.CRAFTING;
-            MenuState existingState = states.get(id);
-            boolean postCloseWatch = existingState != null && existingState.closedByCheck
-                    && now <= existingState.postCloseUntilNanos;
-            if (!containerOpen && !postCloseWatch) {
+            if (!containerOpen) {
                 states.remove(id);
-                violationLevels.remove(id);
-                lastViolationAt.remove(id);
                 ConcurrentLinkedQueue<PacketPosition> stale = packetPositions.get(id);
                 if (stale != null) {
                     stale.clear();
@@ -191,9 +177,8 @@ public final class GhostMenuCheck implements Listener {
                 continue;
             }
 
-            MenuSource source = containerOpen ? MenuSource.CONTAINER : MenuSource.POST_CLOSE;
-            String menuType = containerOpen
-                    ? player.getOpenInventory().getType().name() : "POST_CLOSE";
+            MenuSource source = MenuSource.CONTAINER;
+            String menuType = player.getOpenInventory().getType().name();
             MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
             if (state.safePosition == null) {
                 state.safePosition = player.getLocation().clone();
@@ -203,16 +188,8 @@ public final class GhostMenuCheck implements Listener {
             int drained = 0;
             while (drained++ < MAX_QUEUED_SAMPLES && (sample = queue.poll()) != null) {
                 if (state.source != source) {
-                    long postCloseUntil = state.postCloseUntilNanos;
-                    boolean wasCheckClosed = state.closedByCheck;
                     state.begin(source, sample.atNanos, menuType,
-                            sample.x, sample.y, sample.z,
-                            source == MenuSource.POST_CLOSE ? 0L : openGraceNanos());
-                    if (source == MenuSource.POST_CLOSE && wasCheckClosed) {
-                        state.closedByCheck = true;
-                        state.postCloseUntilNanos = postCloseUntil;
-                        state.graceUntilNanos = 0L;
-                    }
+                            sample.x, sample.y, sample.z, openGraceNanos());
                     state.externalMovementGraceUntilNanos =
                             externalMovementGraceUntil.getOrDefault(id, 0L);
                 }
@@ -505,7 +482,6 @@ public final class GhostMenuCheck implements Listener {
 
         if (level >= 3) {
             state.closedByCheck = true;
-            state.postCloseUntilNanos = System.nanoTime() + postCloseWatchNanos();
             player.closeInventory();
             if (plugin.getConfig().getBoolean("checks.ghost-menu.setback.enabled", true)) {
                 applySetback(player, state);
@@ -635,6 +611,7 @@ public final class GhostMenuCheck implements Listener {
 
         int level = violationLevels.merge(id, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+        lastViolationAt.put(id, now);
         plugin.getAlertManager().send("GhostHand", player, level);
 
         long duration = Math.max(2500L,
@@ -743,11 +720,6 @@ public final class GhostMenuCheck implements Listener {
                 "checks.ghost-menu.velocity-grace-ms", 1000L)) * 1_000_000L;
     }
 
-    private long postCloseWatchNanos() {
-        return Math.max(250L, plugin.getConfig().getLong(
-                "checks.ghost-menu.post-close-watch-ms", 1500L)) * 1_000_000L;
-    }
-
     private long sampleWindowNanos() {
         return Math.max(350L, plugin.getConfig().getLong(
                 "checks.ghost-menu.sample-window-ms", 1200L)) * 1_000_000L;
@@ -758,7 +730,7 @@ public final class GhostMenuCheck implements Listener {
                 "checks.ghost-menu.required-duration-ms", 250L)) * 1_000_000L;
     }
 
-    private enum MenuSource { CONTAINER, POST_CLOSE }
+    private enum MenuSource { CONTAINER }
 
     private record PacketPosition(double x, double y, double z, long atNanos) { }
 
@@ -775,7 +747,6 @@ public final class GhostMenuCheck implements Listener {
         private double lastPacketZ;
         private double verticalMinY;
         private double verticalMaxY;
-        private long postCloseUntilNanos;
         private boolean closedByCheck;
         private Location safePosition;
         private int samples;
