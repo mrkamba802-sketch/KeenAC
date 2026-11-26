@@ -155,7 +155,7 @@ public final class NoWebCheck implements Listener {
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
-        double maxDistance = getAllowedMoveDistance(player, state, now);
+        double maxDistance = getAllowedMoveDistance(player, state, now, to);
         if (state != null) {
             state.lastMovementNanos = now;
         }
@@ -355,7 +355,7 @@ public final class NoWebCheck implements Listener {
      * allowance by the observed interval instead of using one fixed packet
      * distance for every player and every connection.
      */
-    private double getAllowedMoveDistance(Player player, PlayerState state, long now) {
+    private double getAllowedMoveDistance(Player player, PlayerState state, long now, Location movementLocation) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
         double configuredPerTick = Math.max(0.01, Math.min(0.060,
@@ -399,10 +399,12 @@ public final class NoWebCheck implements Listener {
             }
         }
 
-        Material floor = player.getWorld().getBlockAt(
-                floor(player.getLocation().getX()),
-                floor(player.getLocation().getY() - 0.2),
-                floor(player.getLocation().getZ())).getType();
+        Location sampleLocation = movementLocation == null
+                ? player.getLocation() : movementLocation;
+        Material floor = sampleLocation.getWorld().getBlockAt(
+                floor(sampleLocation.getX()),
+                floor(sampleLocation.getY() - 0.2),
+                floor(sampleLocation.getZ())).getType();
         double iceMultiplier = 1.0;
         if (floor.name().contains("ICE")) {
             // Cobweb slowdown is stronger when the web is placed over ice.
