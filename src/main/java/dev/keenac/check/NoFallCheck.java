@@ -33,7 +33,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class NoFallCheck implements Listener {
     private static final long LANDING_CONFIRM_TICKS = 3L;
-    private static final long FALL_EVENT_LOOKBACK_NANOS = 350_000_000L;
 
     private final KeenAC plugin;
     private final Map<UUID, FallEpisode> episodes = new ConcurrentHashMap<>();
@@ -139,7 +138,6 @@ public final class NoFallCheck implements Listener {
 
                     if (!safeLanding && measuredFall >= minimumFallDistance) {
                         episode.landingPending = true;
-                        episode.landingAtNanos = now;
                         episode.landingFallDistance = measuredFall;
                         episode.landingLocation = location.clone();
                         long token = ++episode.episodeId;
@@ -222,7 +220,6 @@ public final class NoFallCheck implements Listener {
         synchronized (episode) {
             if (episode.falling || episode.landingPending) {
                 episode.fallDamageSeen = true;
-                episode.lastFallDamageNanos = System.nanoTime();
             }
         }
     }
@@ -246,8 +243,7 @@ public final class NoFallCheck implements Listener {
                 return;
             }
 
-            boolean vanillaDamageObserved = episode.fallDamageSeen
-                    || episode.lastFallDamageNanos >= landingAtNanos - FALL_EVENT_LOOKBACK_NANOS;
+            boolean vanillaDamageObserved = episode.fallDamageSeen;
             if (vanillaDamageObserved) {
                 episode.resetTracking();
                 lastSafePositions.put(id, player.getLocation().clone());
@@ -465,9 +461,7 @@ public final class NoFallCheck implements Listener {
     private static final class FallEpisode {
         private long episodeId;
         private long startedAtNanos;
-        private long landingAtNanos;
         private long lastPacketNanos;
-        private long lastFallDamageNanos;
         private long safePositionAtMillis;
         private long lastAlertNanos;
         private double fallStartY;
@@ -490,7 +484,6 @@ public final class NoFallCheck implements Listener {
         private void resetTracking() {
             episodeId++;
             startedAtNanos = 0L;
-            landingAtNanos = 0L;
             fallStartY = 0.0;
             peakY = 0.0;
             lowestY = 0.0;
