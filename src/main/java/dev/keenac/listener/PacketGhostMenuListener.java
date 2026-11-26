@@ -31,7 +31,7 @@ public final class PacketGhostMenuListener extends PacketListenerAbstract {
         var location = movement.getLocation();
         if (location != null) {
             check.recordPacketPosition(
-                    player.getUniqueId(), location.getX(), location.getZ());
+                    player.getUniqueId(), location.getX(), location.getY(), location.getZ());
         }
     }
 }
