@@ -190,8 +190,12 @@ public final class WallInteractCheck implements Listener {
             double distance = delta.length();
             if (distance < 0.001) return true;
             if (distance > maxDistance()) continue;
-            if (attacker.getWorld().rayTraceBlocks(eye, delta.multiply(1.0 / distance),
-                    distance, FluidCollisionMode.NEVER, true) == null) {
+            var trace = attacker.getWorld().rayTraceBlocks(eye, delta.multiply(1.0 / distance),
+                    distance, FluidCollisionMode.NEVER, true);
+            // Partial/non-opaque blocks are not strong enough evidence to flag
+            // an entity interaction as wall-blocked.
+            if (trace == null || trace.getHitBlock() == null
+                    || !isSolidOccluder(trace.getHitBlock())) {
                 return true;
             }
         }
