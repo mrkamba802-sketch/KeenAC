@@ -358,10 +358,10 @@ public final class NoWebCheck implements Listener {
     private double getAllowedMoveDistance(Player player, PlayerState state, long now) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
-        double configuredPerTick = Math.max(0.01,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.065));
-        double bufferPerTick = Math.max(0.0,
-                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.004));
+        double configuredPerTick = Math.max(0.01, Math.min(0.060,
+                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.055)));
+        double bufferPerTick = Math.max(0.0, Math.min(0.010,
+                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.003)));
 
         double attributeMultiplier = 1.0;
         AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
@@ -382,18 +382,43 @@ public final class NoWebCheck implements Listener {
         double speedMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
         speedMultiplier = Math.max(0.5, Math.min(3.0, speedMultiplier));
 
-        // Respect server-configured walk speed as well as vanilla attributes.
         double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
+        double stanceMultiplier = player.isSneaking() ? 0.30 : 1.0;
+        if (player.isBlocking()) {
+            stanceMultiplier *= 0.20;
+        }
+
+        // In vanilla, a cobweb permits roughly 25% of normal movement speed;
+        // the Weaving effect raises this to about 50%. Read the effect by key
+        // so the check remains compatible with API versions around its addition.
+        double webMultiplier = 1.0;
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            if ("weaving".equals(effect.getType().getKey().getKey())) {
+                webMultiplier = 2.0;
+                break;
+            }
+        }
+
+        Material floor = player.getWorld().getBlockAt(
+                floor(player.getLocation().getX()),
+                floor(player.getLocation().getY() - 0.2),
+                floor(player.getLocation().getZ())).getType();
+        double iceMultiplier = 1.0;
+        if (floor.name().contains("ICE")) {
+            // Cobweb slowdown is stronger when the web is placed over ice.
+            iceMultiplier = floor == Material.BLUE_ICE ? 0.75 : 0.85;
+        }
 
         double elapsedTicks = 1.0;
         if (state != null && state.lastMovementNanos > 0L) {
             double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
-            // Sub-tick packet spacing is normalized too; long stalls are capped.
+            // Normalize sub-tick packet spacing; cap long stalls to avoid a
+            // large one-off allowance after a delayed client update.
             elapsedTicks = Math.max(0.5, Math.min(4.0, elapsed));
         }
 
-        return (configuredPerTick * speedMultiplier * walkMultiplier + bufferPerTick)
-                * elapsedTicks;
+        return (configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
+                * webMultiplier * iceMultiplier + bufferPerTick) * elapsedTicks;
     }
 
     private void returnToAnchor(Player player, Location requested, PlayerState state) {
