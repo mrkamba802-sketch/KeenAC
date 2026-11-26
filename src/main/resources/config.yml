@@ -95,10 +95,12 @@ checks:
 
   silent-swap:
     enabled: true
-    # Require two rapid slot -> attack -> return sequences without a main-hand swing packet.
+    # Require two repeated silent-swap cycles without a matching main-hand swing.
     # Packet bursts shorter than 4 ms are valid and are not discarded.
     required-cycles: 2
     max-cycle-ms: 100
+    # Window-0 inventory SWAP -> attack -> same SWAP restore sequence.
+    inventory-max-cycle-ms: 180
     observation-window-ms: 1600
     # Correlate a normal main-hand animation packet before/after the attack.
     swing-correlation-ms: 140
