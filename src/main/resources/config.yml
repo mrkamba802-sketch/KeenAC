@@ -112,9 +112,12 @@ checks:
 
   no-fall:
     enabled: true
-    # Alert only after a supported landing with expected fall damage and no
-    # vanilla FALL damage event. Airborne onGround claims are diagnostic only.
+    # Detect four-block falls; client ground claims are only suspicious when
+    # repeated during a server-confirmed airborne descent.
     minimum-fall-distance: 4.0
+    required-ground-packets: 3
+    packet-window-ms: 1000
+    max-ping-ms: 250
     alert-cooldown-ms: 2000
     # On a confirmed NoFall violation, return to the latest safe ground position.
     setback:
