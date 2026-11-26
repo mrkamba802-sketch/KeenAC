@@ -110,7 +110,10 @@ public final class NoWebCheck implements Listener {
             return;
         }
 
-        if (player.isGliding() || isInsideElytraGrace(id, now)) {
+        if (player.isGliding() || player.isFlying()
+                || player.getGameMode() == org.bukkit.GameMode.CREATIVE
+                || player.getGameMode() == org.bukkit.GameMode.SPECTATOR
+                || isInsideElytraGrace(id, now)) {
             states.remove(id);
             return;
         }
@@ -154,16 +157,30 @@ public final class NoWebCheck implements Listener {
         boolean fromInWeb = intersectsCobweb(player, from);
         boolean toInWeb = intersectsCobweb(player, to);
         PlayerState state = states.get(id);
+
+        // A long packet stall is not a reliable speed sample. Re-anchor instead
+        // of turning several delayed client updates into one false violation.
+        if (state != null && state.lastMovementNanos > 0L
+                && now - state.lastMovementNanos > 300_000_000L) {
+            state.lastMovementNanos = now;
+            state.lastSafe = to.clone();
+            state.webEnteredAtNanos = now;
+            return;
+        }
+
         double elapsedTicks = getElapsedTicks(state, now);
         double maxHorizontalDistance = getAllowedMoveDistance(player, to, elapsedTicks);
-        // Cobwebs also slow falling, but vertical motion is not the same as
-        // horizontal walking speed. Keep a separate, deliberately broader
-        // vanilla fall/jump envelope so ordinary descent is never flagged.
+
+        // Vanilla cobweb fall speed is very small after the entry impulse has
+        // settled. Allow a short settling window, then use a separate vertical
+        // envelope; potions with custom vertical physics remain exempt.
         boolean modifiedVerticalPhysics = player.hasPotionEffect(PotionEffectType.LEVITATION)
                 || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
                 || player.hasPotionEffect(PotionEffectType.JUMP_BOOST);
+        long webTimeNanos = state == null ? 0L : Math.max(0L, now - state.webEnteredAtNanos);
+        double verticalPerTick = webTimeNanos < 250_000_000L ? 0.04 : 0.012;
         double maxVerticalDistance = modifiedVerticalPhysics
-                ? Double.POSITIVE_INFINITY : 0.08 * elapsedTicks + 0.005;
+                ? Double.POSITIVE_INFINITY : verticalPerTick * elapsedTicks + 0.003;
         if (state != null) {
             state.lastMovementNanos = now;
         }
@@ -228,8 +245,11 @@ public final class NoWebCheck implements Listener {
         }
 
         if (state == null) {
-            state = new PlayerState(from, now);
+            // The first packet after a reset is a baseline, not evidence. This
+            // avoids comparing a queued packet to a later server-side location.
+            state = new PlayerState(to, now);
             states.put(id, state);
+            return;
         }
 
         if (exceedsWebMovement(from, to, maxHorizontalDistance, maxVerticalDistance)) {
@@ -385,10 +405,14 @@ public final class NoWebCheck implements Listener {
     private double getAllowedMoveDistance(Player player, Location movementLocation, double elapsedTicks) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
-        double configuredPerTick = Math.max(0.01, Math.min(0.027,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.055)));
-        double bufferPerTick = Math.max(0.0, Math.min(0.002,
-                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.003)));
+        // 25% of the normal 4.317 blocks/sec walking speed is about 0.054
+        // blocks per tick. Clamp legacy config values to a sane vanilla range.
+        double configuredPerTick = Math.max(0.035, Math.min(0.075,
+                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.054)));
+        double bufferPerTick = Math.max(0.0, Math.min(0.001,
+                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.00075)));
+        double strictMultiplier = Math.max(1.0, Math.min(1.08,
+                plugin.getConfig().getDouble("checks.no-web.speed-multiplier", 1.035)));
 
         double attributeMultiplier = 1.0;
         AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
@@ -407,7 +431,7 @@ public final class NoWebCheck implements Listener {
         }
         double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
         double speedMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
-        speedMultiplier = Math.max(0.5, Math.min(3.0, speedMultiplier));
+        speedMultiplier = Math.max(0.1, Math.min(4.0, speedMultiplier));
 
         double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
         var boots = player.getInventory().getBoots();
@@ -461,8 +485,8 @@ public final class NoWebCheck implements Listener {
         // Scale the tolerance with stance too; otherwise blocking/sneaking
         // would inherit the full standing-player packet buffer.
         double stanceBufferMultiplier = Math.max(0.20, stanceMultiplier);
-        return (configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
-                * webMultiplier * iceMultiplier
+        return ((configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
+                * webMultiplier * iceMultiplier * strictMultiplier)
                 + bufferPerTick * stanceBufferMultiplier) * elapsedTicks;
     }
 
@@ -502,7 +526,7 @@ public final class NoWebCheck implements Listener {
         // Approximate the player's standing hitbox (0.6 wide, 1.8 high) and
         // inspect every block it overlaps, including webs at head/body height.
         double halfWidth = 0.3;
-        double height = 1.8;
+        double height = player.isSneaking() ? 1.5 : 1.8;
         int minX = floor(location.getX() - halfWidth);
         int maxX = floor(location.getX() + halfWidth);
         int minY = floor(location.getY());
@@ -559,12 +583,14 @@ public final class NoWebCheck implements Listener {
         private long lastViolationTick = Long.MIN_VALUE;
         private long lastViolationNanos;
         private long lastMovementNanos;
+        private long webEnteredAtNanos;
         private int normalMovementSamples;
         private boolean locked;
 
         private PlayerState(Location initialLocation, long initialMovementNanos) {
             this.lastSafe = initialLocation.clone();
             this.lastMovementNanos = initialMovementNanos;
+            this.webEnteredAtNanos = initialMovementNanos;
         }
     }
 }
