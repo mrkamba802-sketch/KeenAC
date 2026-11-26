@@ -112,7 +112,6 @@ public final class SilentSwapCheck {
 
             if (pending == null || now - pending.startedAtNanos > maxCycleNanos) {
                 state.pendingInventorySwap = null;
-                state.pendingInventorySwap = null;
                 state.pendingSwitch = new PendingSwitch(
                         previousSlot, slot, now, snapshot.isEmpty(slot));
                 return;
@@ -134,7 +133,8 @@ public final class SilentSwapCheck {
                 }
                 state.pendingSwitch = null;
             } else {
-                // A new target slot invalidates the unfinished pair.
+                // A new target slot invalidates both unfinished sequence types.
+                state.pendingInventorySwap = null;
                 state.pendingSwitch = new PendingSwitch(
                         previousSlot, slot, now, snapshot.isEmpty(slot));
             }
@@ -242,8 +242,10 @@ public final class SilentSwapCheck {
         CycleCandidate candidate = null;
         synchronized (state) {
             ServerSnapshot snapshot = state.snapshot;
+            int selectedSlot = state.selectedSlot >= 0
+                    ? state.selectedSlot : snapshot == null ? -1 : snapshot.selectedSlot;
             if (snapshot == null || !snapshot.eligible
-                    || button != snapshot.selectedSlot
+                    || button != selectedSlot
                     || clickedSlot == 36 + button) {
                 state.pendingInventorySwap = null;
                 state.pendingSwitch = null;
@@ -264,7 +266,7 @@ public final class SilentSwapCheck {
             if (pending.actionAtNanos > 0L
                     && pending.actionAtNanos >= pending.startedAtNanos
                     && pending.actionAtNanos <= now) {
-                candidate = new CycleCandidate(snapshot.selectedSlot, clickedSlot,
+                candidate = new CycleCandidate(selectedSlot, clickedSlot,
                         pending.actionAtNanos, false, state.generation, true);
                 state.pendingInventorySwap = null;
             } else {
