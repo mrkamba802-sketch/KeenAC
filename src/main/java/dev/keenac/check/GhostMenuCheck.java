@@ -12,6 +12,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityToggleGlideEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -20,6 +21,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.event.vehicle.VehicleEnterEvent;
 import org.bukkit.util.Vector;
 
 import java.util.Map;
@@ -389,6 +391,24 @@ public final class GhostMenuCheck implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void preventGlidingWhileFrozen(EntityToggleGlideEvent event) {
+        if (event.getEntity() instanceof Player player && event.isGliding()
+                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
+            event.setCancelled(true);
+            recordFrozenMovementAttempt(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void preventVehicleEntryWhileFrozen(VehicleEnterEvent event) {
+        if (event.getEntered() instanceof Player player
+                && isFrozen(player.getUniqueId(), System.currentTimeMillis())) {
+            event.setCancelled(true);
+            recordFrozenMovementAttempt(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void preventTeleportWhileFrozen(PlayerTeleportEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         if (applyingFreezeTeleports.contains(id)) {
@@ -409,6 +429,7 @@ public final class GhostMenuCheck implements Listener {
         clearTracking(id);
         frozenUntil.remove(id);
         frozenPositions.remove(id);
+        lastFreezeAttemptAlert.remove(id);
         lastGroundedPositions.remove(id);
         lastGroundedAt.remove(id);
     }
@@ -579,6 +600,7 @@ public final class GhostMenuCheck implements Listener {
         lastFreezeAttemptAlert.clear();
         lastGroundedPositions.clear();
         lastGroundedAt.clear();
+        applyingFreezeTeleports.clear();
     }
 
     public void clearAll() {
