@@ -7,7 +7,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -39,40 +38,57 @@ public final class ScaffoldCheck implements Listener {
         decay = Math.max(0, plugin.getConfig().getDouble("checks.scaffold.violation-decay", 0.05));
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPlace(BlockPlaceEvent event) {
-        if (!enabled) return;
-        Player player = event.getPlayer();
-        if (!eligible(player)) { states.remove(player.getUniqueId()); return; }
-        UUID id = player.getUniqueId();
+    /**
+     * Called on the main thread after PacketEvents decodes a serverbound block-use packet.
+     * The clicked face is used to derive the block position the client intended to place.
+     */
+    public void handlePacketPlacement(UUID id, int clickedX, int clickedY, int clickedZ,
+                                       int faceX, int faceY, int faceZ, boolean mainHand) {
+        if (!enabled || id == null) return;
+        Player player = Bukkit.getPlayer(id);
+        if (player == null || !player.isOnline()) return;
+        if (!eligible(player)) {
+            states.remove(id);
+            return;
+        }
+
+        // A use-on-block packet can also mean food, buckets, doors or other
+        // interactions. Only count it when the selected hand currently holds a block.
+        org.bukkit.inventory.ItemStack held = mainHand
+                ? player.getInventory().getItemInMainHand()
+                : player.getInventory().getItemInOffHand();
+        if (held == null || held.getType().isAir() || !held.getType().isBlock()) return;
+
+        int placedY = clickedY + faceY;
         long now = System.currentTimeMillis();
-        State s = states.computeIfAbsent(id, ignored -> new State());
-        if (s.lastPlace > 0 && now - s.lastPlace > 900) {
-            s.score = Math.max(0, s.score - decay * 4);
-            s.streak = 0;
+        State state = states.computeIfAbsent(id, ignored -> new State());
+        if (state.lastPlace > 0 && now - state.lastPlace > 900) {
+            state.score = Math.max(0, state.score - decay * 4);
+            state.streak = 0;
         }
-        // Score only contextually unusual placements, not single events.
+
         boolean unusualContext = !player.isOnGround()
-                && player.getLocation().getBlockY() <= event.getBlock().getY();
+                && player.getLocation().getBlockY() <= placedY;
         if (unusualContext) {
-            s.streak++;
-            s.score += 1.0;
+            state.streak++;
+            state.score += 1.0;
         } else {
-            s.streak = Math.max(0, s.streak - 1);
-            s.score = Math.max(0, s.score - decay);
+            state.streak = Math.max(0, state.streak - 1);
+            state.score = Math.max(0, state.score - decay);
         }
-        s.lastPlace = now;
-        if (s.streak >= threshold && now - s.lastAlert >= cooldownMs) {
-            s.lastAlert = now;
-            s.vl++;
-            int vl = s.vl;
+        state.lastPlace = now;
+        if (state.streak >= threshold && now - state.lastAlert >= cooldownMs) {
+            state.lastAlert = now;
+            state.vl++;
+            int vl = state.vl;
+            int streak = state.streak;
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Player online = Bukkit.getPlayer(id);
                 if (online != null && online.isOnline() && plugin.getAlertManager() != null
                         && plugin.getConfig().getBoolean("checks.scaffold.enabled", true)) {
                     plugin.getAlertManager().send("Scaffold", online, vl);
                     plugin.getLogger().warning("Scaffold placement review for " + online.getName()
-                            + " (VL=" + vl + ", consecutive contextual samples=" + s.streak + ")");
+                            + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
                 }
             });
         }
