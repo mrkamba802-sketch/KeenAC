@@ -30,6 +30,7 @@ public final class SilentSwapCheck {
 
     private volatile boolean enabled = true;
     private volatile long maxCycleNanos = 100_000_000L;
+    private volatile long inventoryMaxCycleNanos = 180_000_000L;
     private volatile long observationWindowNanos = 1_600_000_000L;
     private volatile long swingCorrelationNanos = 140_000_000L;
     private volatile long alertCooldownNanos = 5_000_000_000L;
@@ -46,6 +47,9 @@ public final class SilentSwapCheck {
         enabled = plugin.getConfig().getBoolean("checks.silent-swap.enabled", true);
         maxCycleNanos = Math.max(20L,
                 plugin.getConfig().getLong("checks.silent-swap.max-cycle-ms", 100L))
+                * 1_000_000L;
+        inventoryMaxCycleNanos = Math.max(40L,
+                plugin.getConfig().getLong("checks.silent-swap.inventory-max-cycle-ms", 180L))
                 * 1_000_000L;
         observationWindowNanos = Math.max(500L,
                 plugin.getConfig().getLong("checks.silent-swap.observation-window-ms", 1600L))
@@ -107,6 +111,8 @@ public final class SilentSwapCheck {
             PendingSwitch pending = state.pendingSwitch;
 
             if (pending == null || now - pending.startedAtNanos > maxCycleNanos) {
+                state.pendingInventorySwap = null;
+                state.pendingInventorySwap = null;
                 state.pendingSwitch = new PendingSwitch(
                         previousSlot, slot, now, snapshot.isEmpty(slot));
                 return;
@@ -123,7 +129,8 @@ public final class SilentSwapCheck {
                             pending.temporarySlot,
                             pending.actionAtNanos,
                             pending.temporarySlotEmpty,
-                            state.generation);
+                            state.generation,
+                            false);
                 }
                 state.pendingSwitch = null;
             } else {
@@ -152,8 +159,21 @@ public final class SilentSwapCheck {
         long now = System.nanoTime();
         synchronized (state) {
             ServerSnapshot snapshot = state.snapshot;
+            if (snapshot == null || !snapshot.eligible) {
+                return;
+            }
+
+            PendingInventorySwap inventoryPending = state.pendingInventorySwap;
+            if (inventoryPending != null) {
+                if (now - inventoryPending.startedAtNanos > inventoryMaxCycleNanos) {
+                    state.pendingInventorySwap = null;
+                } else if (inventoryPending.actionAtNanos == 0L) {
+                    inventoryPending.actionAtNanos = now;
+                }
+            }
+
             PendingSwitch pending = state.pendingSwitch;
-            if (snapshot == null || !snapshot.eligible || pending == null) {
+            if (pending == null) {
                 return;
             }
             if (now - pending.startedAtNanos > maxCycleNanos
@@ -201,6 +221,63 @@ public final class SilentSwapCheck {
         }
     }
 
+    /**
+     * Tracks the two-click window-0 SWAP pattern used to move an inventory item
+     * into the currently selected hotbar slot, attack, and restore the old item.
+     * A click alone never counts as a violation.
+     */
+    public void recordInventorySwap(UUID playerId, int windowId, int clickedSlot, int button) {
+        if (!enabled || playerId == null || windowId != 0
+                || clickedSlot < 0 || clickedSlot > 44
+                || button < 0 || button > 8) {
+            return;
+        }
+
+        PlayerState state = states.get(playerId);
+        if (state == null) {
+            return;
+        }
+
+        long now = System.nanoTime();
+        CycleCandidate candidate = null;
+        synchronized (state) {
+            ServerSnapshot snapshot = state.snapshot;
+            if (snapshot == null || !snapshot.eligible
+                    || button != snapshot.selectedSlot
+                    || clickedSlot == 36 + button) {
+                state.pendingInventorySwap = null;
+                state.pendingSwitch = null;
+                return;
+            }
+
+            // Do not let ordinary inventory clicks be combined with a hotbar
+            // slot-change candidate.
+            state.pendingSwitch = null;
+            PendingInventorySwap pending = state.pendingInventorySwap;
+            if (pending == null || pending.clickedSlot != clickedSlot
+                    || pending.button != button
+                    || now - pending.startedAtNanos > inventoryMaxCycleNanos) {
+                state.pendingInventorySwap = new PendingInventorySwap(clickedSlot, button, now);
+                return;
+            }
+
+            if (pending.actionAtNanos > 0L
+                    && pending.actionAtNanos >= pending.startedAtNanos
+                    && pending.actionAtNanos <= now) {
+                candidate = new CycleCandidate(snapshot.selectedSlot, clickedSlot,
+                        pending.actionAtNanos, false, state.generation, true);
+                state.pendingInventorySwap = null;
+            } else {
+                // A second matching click without an attack starts a fresh pair.
+                state.pendingInventorySwap = new PendingInventorySwap(clickedSlot, button, now);
+            }
+        }
+
+        if (candidate != null) {
+            scheduleCandidateReview(playerId, state, candidate);
+        }
+    }
+
     /** Called on Bukkit's main thread once per tick to publish safe snapshots. */
     public void tick() {
         if (!enabled) {
@@ -243,6 +320,10 @@ public final class SilentSwapCheck {
                         && now - state.pendingSwitch.startedAtNanos > maxCycleNanos) {
                     state.pendingSwitch = null;
                 }
+                if (state.pendingInventorySwap != null
+                        && now - state.pendingInventorySwap.startedAtNanos > inventoryMaxCycleNanos) {
+                    state.pendingInventorySwap = null;
+                }
                 pruneCycles(state, now);
             }
         }
@@ -283,17 +364,19 @@ public final class SilentSwapCheck {
             // discriminator. Empty temporary slots are explicitly preserved
             // as evidence too; empty-hand attacks are not ignored.
             pruneCycles(state, now);
-            state.completedSilentCycles.addLast(candidate.actionAtNanos);
-            while (state.completedSilentCycles.size() > 8) {
-                state.completedSilentCycles.removeFirst();
+            ArrayDeque<Long> cycleQueue = candidate.inventorySwap
+                    ? state.completedInventorySilentCycles : state.completedSilentCycles;
+            cycleQueue.addLast(candidate.actionAtNanos);
+            while (cycleQueue.size() > 8) {
+                cycleQueue.removeFirst();
             }
 
-            if (state.completedSilentCycles.size() < requiredCycles
+            if (cycleQueue.size() < requiredCycles
                     || now - state.lastAlertNanos < alertCooldownNanos) {
                 return;
             }
 
-            state.completedSilentCycles.clear();
+            cycleQueue.clear();
             state.lastAlertNanos = now;
             state.violationLevel++;
             violationLevel = state.violationLevel;
@@ -306,7 +389,9 @@ public final class SilentSwapCheck {
                     + " (VL=" + violationLevel
                     + ", slotCycle=" + candidate.originalSlot + "->"
                     + candidate.temporarySlot + "->" + candidate.originalSlot
-                    + ", temporarySlotEmpty=" + candidate.temporarySlotEmpty
+                    + (candidate.inventorySwap
+                        ? ", method=window0-swap, inventorySlot=" + candidate.temporarySlot
+                        : ", temporarySlotEmpty=" + candidate.temporarySlotEmpty)
                     + ", swingPacket=false)");
         }
     }
@@ -329,6 +414,10 @@ public final class SilentSwapCheck {
                 && now - state.completedSilentCycles.peekFirst() > observationWindowNanos) {
             state.completedSilentCycles.removeFirst();
         }
+        while (!state.completedInventorySilentCycles.isEmpty()
+                && now - state.completedInventorySilentCycles.peekFirst() > observationWindowNanos) {
+            state.completedInventorySilentCycles.removeFirst();
+        }
     }
 
     public void clearAll() {
@@ -349,13 +438,17 @@ public final class SilentSwapCheck {
         private long lastMainHandSwingNanos;
         private long generation;
         private PendingSwitch pendingSwitch;
+        private PendingInventorySwap pendingInventorySwap;
         private ServerSnapshot snapshot;
         private final ArrayDeque<Long> completedSilentCycles = new ArrayDeque<>();
+        private final ArrayDeque<Long> completedInventorySilentCycles = new ArrayDeque<>();
 
         private void clearEvidence() {
             generation++;
             pendingSwitch = null;
+            pendingInventorySwap = null;
             completedSilentCycles.clear();
+            completedInventorySilentCycles.clear();
         }
     }
 
@@ -375,6 +468,20 @@ public final class SilentSwapCheck {
         }
     }
 
+    private static final class PendingInventorySwap {
+        private final int clickedSlot;
+        private final int button;
+        private final long startedAtNanos;
+        private long actionAtNanos;
+
+        private PendingInventorySwap(int clickedSlot, int button, long startedAtNanos) {
+            this.clickedSlot = clickedSlot;
+            this.button = button;
+            this.startedAtNanos = startedAtNanos;
+        }
+    }
+
     private record CycleCandidate(int originalSlot, int temporarySlot, long actionAtNanos,
-                                  boolean temporarySlotEmpty, long generation) { }
+                                  boolean temporarySlotEmpty, long generation,
+                                  boolean inventorySwap) { }
 }
