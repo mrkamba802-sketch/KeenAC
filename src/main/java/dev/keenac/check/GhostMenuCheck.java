@@ -31,9 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Reviews movement packets while a GUI is open. After the third confirmed
- * violation, any further positional movement while the GUI is reopened is
- * treated strictly; the fourth violation also starts a short hard freeze.
+ * Reviews sustained suspicious movement while a server-side GUI is open.
+ * The post-close watch uses the same movement thresholds to avoid flagging
+ * ordinary movement immediately after the inventory is closed.
  */
 public final class GhostMenuCheck implements Listener {
     private static final long MAX_MOVEMENT_GAP_NANOS = 300_000_000L;
@@ -47,7 +47,6 @@ public final class GhostMenuCheck implements Listener {
     private final Map<UUID, MenuState> states = new ConcurrentHashMap<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
-    private final Map<UUID, Long> personalInventoryClicks = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
     private final Map<UUID, Long> externalMovementGraceUntil = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastGroundedPositions = new ConcurrentHashMap<>();
@@ -86,7 +85,6 @@ public final class GhostMenuCheck implements Listener {
         state.begin(MenuSource.CONTAINER, System.nanoTime(), event.getView().getType().name(),
                 location.getX(), location.getY(), location.getZ(), openGraceNanos());
         state.externalMovementGraceUntilNanos = externalMovementGraceUntil.getOrDefault(id, 0L);
-        personalInventoryClicks.remove(id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -107,8 +105,7 @@ public final class GhostMenuCheck implements Listener {
             } else {
                 states.remove(id);
             }
-            personalInventoryClicks.remove(id);
-            ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
+                ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
             if (queue != null) {
                 queue.clear();
             }
@@ -134,13 +131,6 @@ public final class GhostMenuCheck implements Listener {
         }
     }
 
-    /** Window 0 click is a short, best-effort signal for the client-side E inventory. */
-    public void recordPersonalInventoryClick(UUID playerId) {
-        if (playerId != null && enabled()) {
-            personalInventoryClicks.put(playerId, System.nanoTime());
-        }
-    }
-
     /** Called once per tick on the primary server thread. */
     public void tick() {
         if (!enabled()) {
@@ -150,7 +140,6 @@ public final class GhostMenuCheck implements Listener {
 
         long now = System.nanoTime();
         long nowMillis = System.currentTimeMillis();
-        long personalWindow = personalInventoryWindowNanos();
 
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             UUID id = player.getUniqueId();
@@ -176,17 +165,11 @@ public final class GhostMenuCheck implements Listener {
                 lastGroundedAt.put(id, nowMillis);
             }
 
-            long clickAt = personalInventoryClicks.getOrDefault(id, 0L);
-            boolean personalInventoryOpen = clickAt > 0L && now - clickAt <= personalWindow;
-            if (clickAt > 0L && !personalInventoryOpen) {
-                personalInventoryClicks.remove(id, clickAt);
-            }
-
             boolean containerOpen = player.getOpenInventory().getType() != InventoryType.CRAFTING;
             MenuState existingState = states.get(id);
             boolean postCloseWatch = existingState != null && existingState.closedByCheck
                     && now <= existingState.postCloseUntilNanos;
-            if (!containerOpen && !personalInventoryOpen && !postCloseWatch) {
+            if (!containerOpen && !postCloseWatch) {
                 states.remove(id);
                 ConcurrentLinkedQueue<PacketPosition> stale = packetPositions.get(id);
                 if (stale != null) {
@@ -200,12 +183,9 @@ public final class GhostMenuCheck implements Listener {
                 continue;
             }
 
-            MenuSource source = containerOpen
-                    ? MenuSource.CONTAINER
-                    : personalInventoryOpen ? MenuSource.PERSONAL_INVENTORY : MenuSource.POST_CLOSE;
+            MenuSource source = containerOpen ? MenuSource.CONTAINER : MenuSource.POST_CLOSE;
             String menuType = containerOpen
-                    ? player.getOpenInventory().getType().name()
-                    : personalInventoryOpen ? "PLAYER_INVENTORY" : "POST_CLOSE";
+                    ? player.getOpenInventory().getType().name() : "POST_CLOSE";
             MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
 
             PacketPosition sample;
@@ -250,7 +230,6 @@ public final class GhostMenuCheck implements Listener {
                 double dy = sample.y - state.lastPacketY;
                 double dz = sample.z - state.lastPacketZ;
                 double horizontalDistance = Math.hypot(dx, dz);
-                double totalDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 state.setPacketBaseline(sample);
 
                 if (elapsed <= 0L || elapsed > MAX_MOVEMENT_GAP_NANOS) {
@@ -259,25 +238,12 @@ public final class GhostMenuCheck implements Listener {
                     continue;
                 }
 
-                // Once the player has reached x3, any further movement packet
-                // (including a tiny positional nudge or vertical jump) is a flag.
-                if (violationLevels.getOrDefault(id, 0) >= 3
-                        && totalDistance > POSITION_EPSILON) {
-                    boolean closed = reportViolation(player, sample.atNanos, state,
-                            totalDistance / (elapsed / 1_000_000_000.0));
-                    state.resetMovementWindow();
-                    state.resetVerticalWindow(sample.y, sample.atNanos);
-                    if (closed) {
-                        queue.clear();
-                        break;
-                    }
-                    continue;
-                }
-
-                // High vertical displacement is a separate GhostHand signal;
-                // regular small step-height changes remain ignored.
-                if (state.updateVerticalWindow(sample.y, sample.atNanos)
-                        >= HIGH_JUMP_DISTANCE) {
+                // A large jump is only suspicious while a real server-side
+                // container is open, not during the post-close grace period.
+                double verticalDisplacement = state.updateVerticalWindow(
+                        sample.y, sample.atNanos);
+                if (state.source == MenuSource.CONTAINER
+                        && verticalDisplacement >= HIGH_JUMP_DISTANCE) {
                     boolean closed = reportViolation(player, sample.atNanos, state,
                             Math.abs(dy) / (elapsed / 1_000_000_000.0));
                     state.resetMovementWindow();
@@ -328,7 +294,6 @@ public final class GhostMenuCheck implements Listener {
 
         packetPositions.keySet().removeIf(id -> plugin.getServer().getPlayer(id) == null);
         states.keySet().removeIf(id -> plugin.getServer().getPlayer(id) == null);
-        personalInventoryClicks.keySet().removeIf(id -> plugin.getServer().getPlayer(id) == null);
         externalMovementGraceUntil.keySet().removeIf(id -> {
             Long graceUntil = externalMovementGraceUntil.get(id);
             return plugin.getServer().getPlayer(id) == null
@@ -609,7 +574,6 @@ public final class GhostMenuCheck implements Listener {
 
     private void clearTracking(UUID id) {
         states.remove(id);
-        personalInventoryClicks.remove(id);
         externalMovementGraceUntil.remove(id);
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.remove(id);
         if (queue != null) {
@@ -619,7 +583,6 @@ public final class GhostMenuCheck implements Listener {
 
     private void clearTrackingOnly() {
         states.clear();
-        personalInventoryClicks.clear();
         externalMovementGraceUntil.clear();
         packetPositions.values().forEach(ConcurrentLinkedQueue::clear);
         frozenUntil.clear();
@@ -654,8 +617,10 @@ public final class GhostMenuCheck implements Listener {
     }
 
     private double minimumHorizontalSpeed() {
-        return Math.max(1.0, plugin.getConfig().getDouble(
-                "checks.ghost-menu.minimum-horizontal-speed", 1.8));
+        // A normal walk should never be enough to trigger GhostHand.
+        // Keep this floor even when an older config still contains 1.8.
+        return Math.max(2.5, plugin.getConfig().getDouble(
+                "checks.ghost-menu.minimum-horizontal-speed", 2.5));
     }
 
     private double requiredDistance() {
@@ -673,11 +638,6 @@ public final class GhostMenuCheck implements Listener {
                 "checks.ghost-menu.velocity-grace-ms", 1000L)) * 1_000_000L;
     }
 
-    private long personalInventoryWindowNanos() {
-        return Math.max(500L, plugin.getConfig().getLong(
-                "checks.ghost-menu.personal-inventory-window-ms", 2200L)) * 1_000_000L;
-    }
-
     private long postCloseWatchNanos() {
         return Math.max(250L, plugin.getConfig().getLong(
                 "checks.ghost-menu.post-close-watch-ms", 1500L)) * 1_000_000L;
@@ -693,7 +653,7 @@ public final class GhostMenuCheck implements Listener {
                 "checks.ghost-menu.required-duration-ms", 250L)) * 1_000_000L;
     }
 
-    private enum MenuSource { CONTAINER, PERSONAL_INVENTORY, POST_CLOSE }
+    private enum MenuSource { CONTAINER, POST_CLOSE }
 
     private record PacketPosition(double x, double y, double z, long atNanos) { }
 
