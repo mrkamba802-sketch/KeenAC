@@ -30,7 +30,6 @@ public final class ScaffoldCheck implements Listener {
             new ConcurrentHashMap<>();
     private volatile boolean enabled;
     private volatile int threshold;
-    private volatile long cooldownMs;
     private volatile double decay;
 
     public ScaffoldCheck(KeenAC plugin) { this.plugin = plugin; reloadSettings(); }
@@ -38,7 +37,6 @@ public final class ScaffoldCheck implements Listener {
     public void reloadSettings() {
         enabled = plugin.getConfig().getBoolean("checks.scaffold.enabled", true);
         threshold = Math.max(3, plugin.getConfig().getInt("checks.scaffold.threshold", 5));
-        cooldownMs = Math.max(500, plugin.getConfig().getLong("checks.scaffold.cooldown-ms", 1000));
         decay = Math.max(0, plugin.getConfig().getDouble("checks.scaffold.violation-decay", 0.05));
     }
 
@@ -101,16 +99,20 @@ public final class ScaffoldCheck implements Listener {
             state.score = Math.max(0, state.score - decay);
         }
         state.lastPlace = now;
-        if (state.streak >= threshold && now - state.lastAlert >= cooldownMs) {
-            state.lastAlert = now;
+        if (state.streak >= threshold) {
             state.vl++;
             int vl = state.vl;
             int streak = state.streak;
             plugin.getAlertManager().send("Scaffold", player, vl,
                     "Repeated block placements formed a scaffold-like pattern (" + streak
                             + " consecutive contextual samples).");
-            plugin.getLogger().warning("Scaffold placement review for " + player.getName()
-                    + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
+            if (!state.alerting) {
+                plugin.getLogger().warning("Scaffold placement review for " + player.getName()
+                        + " (VL=" + vl + ", consecutive contextual samples=" + streak + ")");
+            }
+            state.alerting = true;
+        } else {
+            state.alerting = false;
         }
     }
 
@@ -150,5 +152,5 @@ public final class ScaffoldCheck implements Listener {
         packetPlacements.clear();
     }
     private record PlacementIntent(int x, int y, int z, long atNanos) { }
-    private static final class State { int streak, vl; double score; long lastPlace, lastAlert; }
+    private static final class State { int streak, vl; double score; long lastPlace; boolean alerting; }
 }
