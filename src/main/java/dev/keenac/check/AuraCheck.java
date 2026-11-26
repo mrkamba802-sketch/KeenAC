@@ -29,7 +29,6 @@ public final class AuraCheck implements Listener {
     private volatile int requiredHits;
     private volatile long windowNanos;
     private volatile long flagDurationNanos;
-    private volatile long alertCooldownNanos;
     private volatile double maxDistanceSquared;
 
     public AuraCheck(KeenAC plugin) {
@@ -50,9 +49,6 @@ public final class AuraCheck implements Listener {
                 * 1_000_000L;
         flagDurationNanos = Math.max(100L,
                 plugin.getConfig().getLong("checks.aura.flag-duration-ms", 900L))
-                * 1_000_000L;
-        alertCooldownNanos = Math.max(1000L,
-                plugin.getConfig().getLong("checks.aura.alert-cooldown-ms", 5000L))
                 * 1_000_000L;
         double maxDistance = Math.max(3.0,
                 plugin.getConfig().getDouble("checks.aura.max-distance", 5.0));
@@ -160,10 +156,7 @@ public final class AuraCheck implements Listener {
             attacker.flaggedUntilNanos = now + flagDurationNanos;
             attacker.violationLevel++;
             violationLevel = attacker.violationLevel;
-            if (now - attacker.lastAlertNanos >= alertCooldownNanos) {
-                attacker.lastAlertNanos = now;
-                alert = true;
-            }
+            alert = true;
         }
 
         if (alert) {
@@ -199,7 +192,6 @@ public final class AuraCheck implements Listener {
         private float yaw;
         private long lastPacketRotationNanos;
         private long flaggedUntilNanos;
-        private long lastAlertNanos;
         private int violationLevel;
     }
 
