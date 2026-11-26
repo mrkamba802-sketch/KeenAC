@@ -4,7 +4,10 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.MotionCheck;
@@ -44,6 +47,23 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             airStuckCheck.recordPacketPosition(playerId, x, y, z);
             motionCheck.recordElytraPacketPosition(playerId, x, y, z);
             motionCheck.recordPacketMovement(playerId, x, y, z, movement.isOnGround());
+            return;
+        }
+
+        // Block breaking is initiated by serverbound digging packets. Reject
+        // the start/finish packet itself once AirStuck has been confirmed.
+        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
+            if (airStuckCheck.shouldCancelBlockActions()
+                    && airStuckCheck.isFlagged(player.getUniqueId())) {
+                WrapperPlayClientPlayerDigging digging =
+                        new WrapperPlayClientPlayerDigging(event);
+                DiggingAction action = digging.getAction();
+                if (action == DiggingAction.START_DIGGING
+                        || action == DiggingAction.FINISHED_DIGGING
+                        || action == DiggingAction.CANCELLED_DIGGING) {
+                    event.setCancelled(true);
+                }
+            }
             return;
         }
 
