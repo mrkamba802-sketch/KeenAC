@@ -48,6 +48,7 @@ public final class NoFallCheck implements Listener {
     private volatile boolean setbackEnabled = true;
     private volatile long safePositionMaxAgeMillis = 30_000L;
     private volatile boolean damageEnabled = true;
+    private volatile long packetWindowNanos = 750_000_000L;
 
     public NoFallCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -67,6 +68,13 @@ public final class NoFallCheck implements Listener {
         safePositionMaxAgeMillis = Math.max(1000L,
                 plugin.getConfig().getLong("checks.no-fall.setback.safe-position-max-age-ms", 30000L));
         damageEnabled = plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true);
+        packetWindowNanos = Math.max(100L,
+                plugin.getConfig().getLong("checks.no-fall.packet-window-ms", 750L))
+                * 1_000_000L;
+        int requiredGroundPackets = Math.max(1,
+                plugin.getConfig().getInt("checks.no-fall.required-packets", 2));
+        int maxPingMs = Math.max(0,
+                plugin.getConfig().getInt("checks.no-fall.max-ping-ms", 250));
 
         if (!enabled) {
             episodes.clear();
@@ -137,6 +145,31 @@ public final class NoFallCheck implements Listener {
                         episode.peakY = Math.max(episode.peakY, location.getY());
                         episode.lowestY = Math.min(episode.lowestY, location.getY());
                     }
+
+                    // Repeated client onGround claims while the collision probe
+                    // still proves the player is airborne are a direct NoFall signal.
+                    if (episode.falling && !episode.landingPending
+                            && episode.clientGroundClaims >= requiredGroundPackets
+                            && episode.firstClientGroundClaimNanos > 0L
+                            && now - episode.firstClientGroundClaimNanos <= packetWindowNanos
+                            && player.getPing() <= maxPingMs) {
+                        double measuredFall = Math.max(0.0,
+                                episode.peakY - Math.min(episode.lowestY, location.getY()));
+                        if (measuredFall >= minimumFallDistance) {
+                            episode.landingPending = true;
+                            episode.landingFallDistance = measuredFall;
+                            episode.landingLocation = location.clone();
+                            long token = ++episode.episodeId;
+                            Location safe = episode.safePosition == null
+                                    ? copyLocation(lastSafePositions.get(id))
+                                    : episode.safePosition.clone();
+                            long safeAt = episode.safePositionAtMillis;
+                            World landingWorld = world;
+                            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmLanding(
+                                    id, token, landingWorld, measuredFall, safe, safeAt, now),
+                                    LANDING_CONFIRM_TICKS);
+                        }
+                    }
                     continue;
                 }
 
@@ -197,8 +230,9 @@ public final class NoFallCheck implements Listener {
         }
         FallEpisode episode = episodes.computeIfAbsent(id, ignored -> new FallEpisode());
         synchronized (episode) {
+            long packetNow = System.nanoTime();
             episode.lastClientOnGround = clientOnGround;
-            episode.lastPacketNanos = System.nanoTime();
+            episode.lastPacketNanos = packetNow;
             if (hasPosition && Double.isFinite(packetY)) {
                 if (!episode.hasPacketY) {
                     episode.packetPeakY = packetY;
@@ -232,7 +266,17 @@ public final class NoFallCheck implements Listener {
                 }
             }
             if (episode.falling && clientOnGround) {
-                episode.clientGroundClaims++;
+                if (episode.firstClientGroundClaimNanos == 0L
+                        || packetNow - episode.firstClientGroundClaimNanos > packetWindowNanos) {
+                    episode.firstClientGroundClaimNanos = packetNow;
+                    episode.clientGroundClaims = 1;
+                } else {
+                    episode.clientGroundClaims = Math.min(Integer.MAX_VALUE,
+                            episode.clientGroundClaims + 1);
+                }
+            } else if (episode.falling) {
+                episode.firstClientGroundClaimNanos = 0L;
+                episode.clientGroundClaims = 0;
             }
         }
     }
@@ -517,6 +561,7 @@ public final class NoFallCheck implements Listener {
         private long episodeId;
         private long startedAtNanos;
         private long lastPacketNanos;
+        private long firstClientGroundClaimNanos;
         private long safePositionAtMillis;
         private long lastAlertNanos;
         private double fallStartY;
@@ -550,6 +595,7 @@ public final class NoFallCheck implements Listener {
             fallDamageSeen = false;
             violationHandled = false;
             hasPacketY = false;
+            firstClientGroundClaimNanos = 0L;
             clientGroundClaims = 0;
             world = null;
             safePosition = null;
