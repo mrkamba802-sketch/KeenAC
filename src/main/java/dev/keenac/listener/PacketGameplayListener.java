@@ -5,7 +5,6 @@ import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.DiggingAction;
-import com.github.retrooper.packetevents.protocol.player.InteractionHand;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAttack;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
@@ -58,7 +57,7 @@ public final class PacketGameplayListener extends PacketListenerAbstract {
                         movement.getLocation();
                 if (location != null) {
                     noWeb.recordPacketPosition(playerId, location.getX(), location.getY(),
-                            location.getZ(), location.getYaw(), location.getPitch());
+                            location.getZ());
                     noSlow.recordPacketMovement(playerId, location.getX(), location.getY(),
                             location.getZ());
                 }
@@ -86,10 +85,9 @@ public final class PacketGameplayListener extends PacketListenerAbstract {
                 int faceX = face.getModX();
                 int faceY = face.getModY();
                 int faceZ = face.getModZ();
-                boolean mainHand = placement.getHand() == InteractionHand.MAIN_HAND;
-                Bukkit.getScheduler().runTask(plugin, () ->
-                        scaffold.handlePacketPlacement(playerId, x, y, z,
-                                faceX, faceY, faceZ, mainHand));
+                // Primitive values only: this method is safe on the packet thread.
+                scaffold.recordPacketPlacement(playerId, x, y, z,
+                        faceX, faceY, faceZ);
             }
             return;
         }
