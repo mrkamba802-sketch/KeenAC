@@ -357,7 +357,8 @@ public final class AirStuckCheck {
             state.violationLevel++;
         }
 
-        plugin.getAlertManager().send("AirStuck", player, state.violationLevel);
+        plugin.getAlertManager().send("AirStuck", player, state.violationLevel,
+                "The player remained nearly stationary in the air beyond the configured confirmation window.");
 
         state.hasAlerted = true;
         state.lastAlertTick = serverTick;
