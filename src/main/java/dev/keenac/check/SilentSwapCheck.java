@@ -16,10 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Packet-driven SilentSwap review.
  *
- * The only evidence accepted by this check is a rapid HELD_ITEM_CHANGE
- * switch-away / attack / switch-back sequence without a matching main-hand
- * swing packet. Window click and inventory-mutation packets are deliberately
- * excluded and only clear an in-progress candidate.
+ * Evidence is accepted from either a rapid HELD_ITEM_CHANGE switch-away /
+ * attack / switch-back sequence, or a repeated window-0 hotbar SWAP / attack /
+ * restore sequence. Both require the absence of a matching main-hand swing.
+ * Unrelated inventory clicks only clear incomplete evidence.
  *
  * The server-thread tick publishes immutable inventory/eligibility snapshots;
  * packet callbacks never access Bukkit inventories or entities.
@@ -204,9 +204,9 @@ public final class SilentSwapCheck {
     }
 
     /**
-     * Inventory clicks, item moves, and window swaps never count as evidence.
-     * They invalidate only the unfinished packet sequence so clicks cannot be
-     * associated with an unrelated attack that happens afterwards.
+     * Unrelated inventory clicks and item moves never count as evidence.
+     * They invalidate unfinished sequences so clicks cannot be associated
+     * with an unrelated attack that happens afterwards.
      */
     public void recordInventoryMutation(UUID playerId) {
         if (playerId == null) {
@@ -385,7 +385,7 @@ public final class SilentSwapCheck {
         }
 
         plugin.getAlertManager().send("SilentSwap", player, violationLevel,
-                "Rapid hotbar slot swapping around an attack was detected without the expected main-hand swing.");
+                "Repeated hotbar or inventory swapping around an attack was detected without the expected main-hand swing.");
         if (plugin.getConfig().getBoolean("checks.silent-swap.log-context", true)) {
             plugin.getLogger().info("SilentSwap confirmed for " + player.getName()
                     + " (VL=" + violationLevel
