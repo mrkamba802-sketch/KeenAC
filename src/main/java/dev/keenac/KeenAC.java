@@ -11,6 +11,7 @@ import dev.keenac.check.InventoryAutoSwapCheck;
 import dev.keenac.check.GhostMenuCheck;
 import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.MotionCheck;
+import dev.keenac.check.MovementSetbackManager;
 import dev.keenac.check.WallHitCheck;
 import dev.keenac.check.WallInteractCheck;
 import dev.keenac.check.NoSlowCheck;
@@ -49,6 +50,7 @@ public final class KeenAC extends JavaPlugin {
     private AimCheck aimCheck;
     private ReachCheck reachCheck;
     private MotionCheck motionCheck;
+    private MovementSetbackManager movementSetbackManager;
     private SilentSwapCheck silentSwapCheck;
     private BaritoneCheck baritoneCheck;
     private ScaffoldCheck scaffoldCheck;
@@ -76,6 +78,8 @@ public final class KeenAC extends JavaPlugin {
 
         saveDefaultConfig();
         alertManager = new AlertManager(this);
+        movementSetbackManager = new MovementSetbackManager(this);
+        Bukkit.getPluginManager().registerEvents(movementSetbackManager, this);
         for (org.bukkit.entity.Player online : Bukkit.getOnlinePlayers()) {
             alertManager.enableForStaff(online);
         }
@@ -153,6 +157,10 @@ public final class KeenAC extends JavaPlugin {
         return motionCheck;
     }
 
+    public MovementSetbackManager getMovementSetbackManager() {
+        return movementSetbackManager;
+    }
+
     public AlertManager getAlertManager() {
         return alertManager;
     }
@@ -213,6 +221,7 @@ public final class KeenAC extends JavaPlugin {
         if (aimCheck != null) aimCheck.clearAll();
         if (reachCheck != null) reachCheck.clearAll();
         if (motionCheck != null) motionCheck.clearAll();
+        if (movementSetbackManager != null) movementSetbackManager.clearAll();
         if (silentSwapCheck != null) silentSwapCheck.clearAll();
         if (baritoneCheck != null) baritoneCheck.clearAll();
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
