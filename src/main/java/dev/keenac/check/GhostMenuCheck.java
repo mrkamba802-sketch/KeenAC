@@ -17,6 +17,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -64,6 +65,7 @@ public final class GhostMenuCheck implements Listener {
     public void onInventoryOpen(InventoryOpenEvent event) {
         if (!(event.getPlayer() instanceof Player player)
                 || event.getView().getType() == InventoryType.CRAFTING
+                || player.getGameMode() == GameMode.CREATIVE
                 || !enabled()) {
             return;
         }
@@ -152,6 +154,13 @@ public final class GhostMenuCheck implements Listener {
 
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             UUID id = player.getUniqueId();
+
+            // Creative players are excluded from the entire check, including
+            // any freeze that may have been started before their mode changed.
+            if (player.getGameMode() == GameMode.CREATIVE) {
+                clearCreativeState(id);
+                continue;
+            }
 
             if (isFrozen(id, nowMillis)) {
                 player.setVelocity(new Vector(0.0, 0.0, 0.0));
@@ -435,6 +444,13 @@ public final class GhostMenuCheck implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
+    public void onGameModeChange(PlayerGameModeChangeEvent event) {
+        if (event.getNewGameMode() == GameMode.CREATIVE) {
+            clearCreativeState(event.getPlayer().getUniqueId());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         clearTracking(id);
@@ -579,6 +595,16 @@ public final class GhostMenuCheck implements Listener {
             return false;
         }
         return true;
+    }
+
+    private void clearCreativeState(UUID id) {
+        clearTracking(id);
+        violationLevels.remove(id);
+        frozenUntil.remove(id);
+        frozenPositions.remove(id);
+        lastFreezeAttemptAlert.remove(id);
+        lastGroundedPositions.remove(id);
+        lastGroundedAt.remove(id);
     }
 
     private void clearTracking(UUID id) {
