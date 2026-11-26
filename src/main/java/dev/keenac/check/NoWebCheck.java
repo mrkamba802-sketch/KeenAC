@@ -53,15 +53,13 @@ public final class NoWebCheck implements Listener {
      * PacketEvents callback: queues immutable movement data only.
      * World queries and player corrections are processed by the sync tick task.
      */
-    public void recordPacketPosition(UUID id, double x, double y, double z,
-                                     float yaw, float pitch) {
-        if (id == null || !Double.isFinite(x) || !Double.isFinite(y)
-                || !Double.isFinite(z) || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
+    public void recordPacketPosition(UUID id, double x, double y, double z) {
+        if (id == null || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
             return;
         }
         ConcurrentLinkedQueue<PacketPosition> queue =
                 packetPositions.computeIfAbsent(id, ignored -> new ConcurrentLinkedQueue<>());
-        queue.add(new PacketPosition(x, y, z, yaw, pitch, System.nanoTime()));
+        queue.add(new PacketPosition(x, y, z, System.nanoTime()));
         while (queue.size() > 128) {
             if (queue.poll() == null) break;
         }
@@ -82,8 +80,9 @@ public final class NoWebCheck implements Listener {
                 if (from == null || from.getWorld() != player.getWorld()) {
                     from = player.getLocation().clone();
                 }
+                Location serverLocation = player.getLocation();
                 Location to = new Location(player.getWorld(), sample.x, sample.y, sample.z,
-                        sample.yaw, sample.pitch);
+                        serverLocation.getYaw(), serverLocation.getPitch());
                 processPacketMovement(player, from, to, sample.atNanos);
                 if (correctionThisSample.remove(id)) {
                     entry.getValue().clear();
@@ -372,8 +371,7 @@ public final class NoWebCheck implements Listener {
         correctionThisSample.clear();
     }
 
-    private record PacketPosition(double x, double y, double z,
-                                  float yaw, float pitch, long atNanos) { }
+    private record PacketPosition(double x, double y, double z, long atNanos) { }
 
     private static final class PlayerState {
         private Location lastSafe;
