@@ -184,6 +184,7 @@ public final class NoWebCheck implements Listener {
                 return;
             }
 
+            double moved = from.distance(to);
             if (exceedsWebMovement(from, to, maxHorizontalDistance, maxVerticalDistance)) {
                 state.normalMovementSamples = 0;
                 returnToAnchor(player, to, state);
