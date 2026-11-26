@@ -144,6 +144,7 @@ public final class MotionCheck implements Listener {
         }
         lastSafePosition.put(id, player.getLocation().clone());
         lastSafeAt.put(id, now);
+        plugin.getMovementSetbackManager().recordValidPosition(player, player.getLocation());
     }
 
     private boolean hasRecentMotionEvidence(UUID id, long now) {
@@ -1007,21 +1008,20 @@ public final class MotionCheck implements Listener {
             applyingSetbacks.add(id);
             boolean applied;
             try {
-                applied = online.teleport(correction, PlayerTeleportEvent.TeleportCause.PLUGIN);
+                applied = plugin.getMovementSetbackManager().setback(online, correction, "Motion");
             } finally {
                 applyingSetbacks.remove(id);
             }
 
             if (applied) {
-                long freezeDuration = Math.max(1L,
-                        plugin.getConfig().getLong("checks.motion.setback.freeze-duration-ms", 3500L));
-                frozenUntil.put(id, System.currentTimeMillis() + freezeDuration);
-                frozenPosition.put(id, online.getLocation().clone());
-                online.setVelocity(new Vector(0.0, 0.0, 0.0));
+                // The shared manager performs a synchronous position correction,
+                // zeros velocity and briefly rejects further positional deltas.
                 lastJumpOrigin.remove(id);
                 lastJumpAt.remove(id);
+                motionPacketStates.remove(id);
+                samplePositions.remove(id);
             } else {
-                plugin.getLogger().fine("Motion hard setback could not be applied to "
+                plugin.getLogger().fine("Motion rubberband could not be applied to "
                         + online.getName() + ".");
             }
         });
