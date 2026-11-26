@@ -61,10 +61,12 @@ checks:
     # varies with entry momentum, gravity and potion physics.
     # Effective allowance accounts for attributes, potions, sprint, sneak, shield,
     # Weaving and walk speed.
-    max-move-distance: 0.054
-    movement-buffer: 0.0015
-    # Small tolerance above the estimated vanilla speed; sustained excess is reviewed.
-    speed-multiplier: 1.035
+    max-move-distance: 0.062
+    movement-buffer: 0.002
+    # A wider tolerance reduces sensitivity to legitimate packet timing and movement variation.
+    speed-multiplier: 1.06
+    # Require sustained horizontal excess over several server ticks before adding violation level.
+    required-samples: 4
     # Ignore short server-applied impulses such as knockback while re-baselining.
     velocity-grace-ms: 500
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
