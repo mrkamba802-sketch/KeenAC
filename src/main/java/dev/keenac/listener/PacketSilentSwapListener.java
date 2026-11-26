@@ -34,7 +34,7 @@ public final class PacketSilentSwapListener extends PacketListenerAbstract {
         }
 
         var playerId = player.getUniqueId();
-        PacketType.Play.Client type = (PacketType.Play.Client) event.getPacketType();
+        var type = event.getPacketType();
 
         if (type == PacketType.Play.Client.HELD_ITEM_CHANGE) {
             WrapperPlayClientHeldItemChange held =
