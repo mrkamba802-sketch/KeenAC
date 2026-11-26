@@ -31,8 +31,7 @@ public final class WallInteractCheck implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockInteract(PlayerInteractEvent event) {
-        if (!enabled() || !cancelActions()
-                || event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+        if (!enabled() || event.getAction() != Action.RIGHT_CLICK_BLOCK) {
             return;
         }
 
@@ -50,7 +49,9 @@ public final class WallInteractCheck implements Listener {
         }
         Block obstacle = findOccluder(player, clicked);
         if (obstacle != null && isSolidOccluder(obstacle)) {
-            event.setCancelled(true);
+            if (cancelActions()) {
+                event.setCancelled(true);
+            }
             report(player, "Attempted to interact with " + clicked.getType()
                     + " while Line of Sight was blocked by " + obstacle.getType() + ".");
         }
@@ -58,14 +59,20 @@ public final class WallInteractCheck implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityInteract(PlayerInteractEntityEvent event) {
-        if (!enabled() || !cancelActions()) {
+        if (!enabled()) {
             return;
         }
 
         Player player = event.getPlayer();
         Entity target = event.getRightClicked();
-        if (target.getWorld() == player.getWorld() && !canSeeAnyPart(player, target)) {
-            event.setCancelled(true);
+        if (target.getWorld() != player.getWorld()
+                || player.getEyeLocation().distance(target.getLocation()) > maxDistance()) {
+            return;
+        }
+        if (!canSeeAnyPart(player, target)) {
+            if (cancelActions()) {
+                event.setCancelled(true);
+            }
             report(player, "Attempted to interact with entity " + target.getType()
                     + " while Line of Sight was blocked by a solid block.");
         }
@@ -102,16 +109,29 @@ public final class WallInteractCheck implements Listener {
     }
 
     private boolean isSolidOccluder(Block block) {
-        // Ignore partial shapes and blocks with non-solid collision behaviour.
-        return block.getType().isSolid() && block.getCollisionShape().getBoundingBoxes().size() == 1;
+        // Require a genuinely occluding, simple collision shape. This skips
+        // slabs, stairs, fences, panes and other partial geometry.
+        return block.getType().isSolid()
+                && block.getType().isOccluding()
+                && block.getCollisionShape().getBoundingBoxes().size() == 1;
     }
 
     private Block findOccluder(Player player, Block target) {
         Location eye = player.getEyeLocation();
-        double distance = Math.min(maxDistance(),
-                Math.max(1.0, eye.distance(target.getLocation().add(0.5, 0.5, 0.5)) + 0.75));
-        var trace = player.getWorld().rayTraceBlocks(eye, eye.getDirection(), distance,
-                FluidCollisionMode.NEVER, true);
+        Location targetCenter = target.getLocation().add(0.5, 0.5, 0.5);
+        Vector direction = targetCenter.toVector().subtract(eye.toVector());
+        double targetDistance = direction.length();
+
+        // Only evaluate clear, longer-range interactions. Aim the ray at the
+        // clicked block itself instead of extending the player's view ray past it.
+        if (targetDistance < minCheckDistance() || targetDistance > maxDistance()
+                || targetDistance < 0.05) {
+            return null;
+        }
+
+        direction.multiply(1.0 / targetDistance);
+        var trace = player.getWorld().rayTraceBlocks(eye, direction,
+                Math.max(0.05, targetDistance - 0.05), FluidCollisionMode.NEVER, true);
         if (trace == null || trace.getHitBlock() == null
                 || trace.getHitBlock().equals(target)) {
             return null;
