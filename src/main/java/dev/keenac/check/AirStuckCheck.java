@@ -337,33 +337,12 @@ public final class AirStuckCheck {
         if (!state.flagged) {
             state.flagged = true;
             state.violationLevel++;
-            state.nextAlertTick = serverTick;
-            state.alertedDuringCurrentFlag = false;
         }
 
-        if (serverTick < state.nextAlertTick) {
-            return;
-        }
-
-        long cooldownTicks = Math.max(0L,
-                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 20L;
-
-        if (state.hasAlerted && serverTick - state.lastAlertTick < cooldownTicks) {
-            state.nextAlertTick = state.lastAlertTick + cooldownTicks;
-            return;
-        }
-
-        if (state.alertedDuringCurrentFlag) {
-            state.violationLevel++;
-        }
-
+        // AlertManager owns the real-time cooldown and queues one pending
+        // notification for the end of the cooldown while the violation persists.
         plugin.getAlertManager().send("AirStuck", player, state.violationLevel,
                 "The player remained nearly stationary in the air beyond the configured confirmation window.");
-
-        state.hasAlerted = true;
-        state.lastAlertTick = serverTick;
-        state.nextAlertTick = serverTick + cooldownTicks;
-        state.alertedDuringCurrentFlag = true;
     }
 
     private void clearSuspicion(Player player, PlayerState state) {
@@ -376,8 +355,6 @@ public final class AirStuckCheck {
         state.flagged = false;
         state.stationaryTicks = 0;
         state.confirmationSamples = 0;
-        state.alertedDuringCurrentFlag = false;
-        state.nextAlertTick = 0L;
     }
 
     /** Read-only packet-thread-safe flag lookup. */
@@ -433,10 +410,6 @@ public final class AirStuckCheck {
         private int confirmationSamples;
         private int violationLevel;
         private volatile boolean flagged;
-        private boolean hasAlerted;
-        private boolean alertedDuringCurrentFlag;
-        private long lastAlertTick;
-        private long nextAlertTick;
 
         private PlayerState(Location initialLocation) {
             this.worldId = initialLocation.getWorld().getUID();
