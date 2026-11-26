@@ -1,17 +1,24 @@
 package dev.keenac.alert;
 
 import dev.keenac.KeenAC;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
 public final class AlertManager {
+    private static final String CHECK_MARKER = "\u0001KEENAC_CHECK\u0001";
+
     private final KeenAC plugin;
     private final Set<UUID> enabled = new HashSet<>();
+    private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
 
     public AlertManager(KeenAC plugin) {
         this.plugin = plugin;
@@ -37,23 +44,61 @@ public final class AlertManager {
     }
 
     public void send(String checkName, Player suspect, int violationLevel) {
+        send(checkName, suspect, violationLevel, "Confirmed check violation.");
+    }
+
+    public void send(String checkName, Player suspect, int violationLevel, String reason) {
         if (!plugin.getConfig().getBoolean("alerts.enabled", true)) return;
 
         String prefix = plugin.getConfig().getString("alerts.prefix", "&bKeenAC &8»");
         String format = plugin.getConfig().getString(
                 "alerts.format", "{prefix} &f{player} &7failed &c{check} &8(x{vl})");
-        String message = format
+        String safeReason = reason == null || reason.isBlank()
+                ? "No additional reason was recorded." : reason;
+        int ping = suspect.getPing();
+        double[] recentTps = Bukkit.getTPS();
+        double tps = recentTps.length == 0 ? 20.0 : recentTps[0];
+        String tpsText = Double.isFinite(tps)
+                ? String.format(Locale.ROOT, "%.2f", tps) : "unknown";
+
+        String templated = format
                 .replace("{prefix}", prefix)
                 .replace("{player}", suspect.getName())
-                .replace("{check}", checkName)
-                .replace("{vl}", Integer.toString(violationLevel));
-        message = ChatColor.translateAlternateColorCodes('&', message);
+                .replace("{check}", CHECK_MARKER)
+                .replace("{vl}", Integer.toString(violationLevel))
+                .replace("{reason}", safeReason)
+                .replace("{ping}", Integer.toString(ping))
+                .replace("{tps}", tpsText);
 
+        String plainMessage = templated.replace(CHECK_MARKER, checkName);
         if (plugin.getConfig().getBoolean("alerts.console", true)) {
-            Bukkit.getConsoleSender().sendMessage(message);
+            Bukkit.getConsoleSender().sendMessage(
+                    ChatColor.translateAlternateColorCodes('&', plainMessage));
         }
+
         String permission = plugin.getConfig().getString(
                 "commands.alerts-permission", "keenac.alerts");
+        int markerIndex = templated.indexOf(CHECK_MARKER);
+        Component message;
+        if (markerIndex >= 0) {
+            String before = templated.substring(0, markerIndex);
+            String after = templated.substring(markerIndex + CHECK_MARKER.length());
+            Component details = legacy.deserialize(
+                    "&bПроверка: &f" + checkName
+                            + "\n&bИгрок: &f" + suspect.getName()
+                            + "\n&bПричина: &f" + safeReason
+                            + "\n&bПинг: &f" + ping + " ms"
+                            + "\n&bTPS: &f" + tpsText
+                            + "\n&bУровень: &fх" + violationLevel);
+            Component check = legacy.deserialize("&c" + checkName)
+                    .hoverEvent(HoverEvent.showText(details));
+            message = legacy.deserialize(before)
+                    .append(check)
+                    .append(legacy.deserialize(after));
+        } else {
+            message = legacy.deserialize(plainMessage);
+        }
+
         for (Player recipient : Bukkit.getOnlinePlayers()) {
             if (enabled.contains(recipient.getUniqueId())
                     && recipient.hasPermission(permission)) {
