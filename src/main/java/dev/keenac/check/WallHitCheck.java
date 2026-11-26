@@ -63,7 +63,8 @@ public final class WallHitCheck implements Listener {
                 plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1000L;
         long previous = lastAlertMillis.getOrDefault(attackerId, 0L);
         if (now - previous >= cooldown) {
-            plugin.getAlertManager().send("WallHit", attacker, vl);
+            plugin.getAlertManager().send("WallHit", attacker, vl,
+                    "Attack target was fully hidden behind a solid block; Line of Sight was blocked.");
             lastAlertMillis.put(attackerId, now);
         }
     }
