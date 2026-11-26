@@ -252,7 +252,7 @@ public final class NoWebCheck implements Listener {
         double elapsed = (now - state.lastMovementNanos) / 50_000_000.0;
         // Normalize sub-tick packet spacing; cap long stalls to avoid a
         // large one-off allowance after a delayed client update.
-        return Math.max(0.5, Math.min(4.0, elapsed));
+        return Math.max(1.0, Math.min(4.0, elapsed));
     }
 
     private boolean exceedsWebMovement(Location from, Location to,
