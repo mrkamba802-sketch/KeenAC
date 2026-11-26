@@ -56,11 +56,13 @@ checks:
 
   no-web:
     enabled: true
-    # Maximum baseline displacement per 50 ms while touching a cobweb.
-    # Effective allowance is adjusted for speed/slowness, sprint, sneak, shield,
-    # Weaving, walk speed, and ice beneath the web. Older values are safely capped.
-    max-move-distance: 0.025
-    movement-buffer: 0.0015
+    # Vanilla cobweb movement is about 25% of normal walking speed (about 0.054 blocks/tick).
+    # Effective allowance also accounts for attributes, potions, sprint, sneak, shield,
+    # Weaving, walk speed and the block beneath the web.
+    max-move-distance: 0.054
+    movement-buffer: 0.00075
+    # Small tolerance above the estimated vanilla speed; sustained excess is reviewed.
+    speed-multiplier: 1.035
     # Ignore short server-applied impulses such as knockback while re-baselining.
     velocity-grace-ms: 500
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
@@ -144,8 +146,8 @@ checks:
     # PacketEvents horizontal movement analysis against the estimated vanilla speed.
     # A small excess is reviewed over a smoothed window to reduce packet-jitter noise.
     speed:
-      multiplier: 1.06
-      buffer-bps: 0.12
+      multiplier: 1.025
+      buffer-bps: 0.04
       confirm-samples: 3
       sample-window-ms: 500
     # Minimum interval between independent packet anomaly signals, not alert delivery.
