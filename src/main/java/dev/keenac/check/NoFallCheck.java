@@ -44,7 +44,6 @@ public final class NoFallCheck implements Listener {
 
     private volatile boolean enabled = true;
     private volatile double minimumFallDistance = 3.0;
-    private volatile long alertCooldownNanos = 2_000_000_000L;
     private volatile boolean setbackEnabled = true;
     private volatile long safePositionMaxAgeMillis = 30_000L;
     private volatile boolean damageEnabled = true;
@@ -60,10 +59,9 @@ public final class NoFallCheck implements Listener {
      */
     public void tick() {
         enabled = plugin.getConfig().getBoolean("checks.no-fall.enabled", true);
-        minimumFallDistance = Math.max(2.0,
-                plugin.getConfig().getDouble("checks.no-fall.minimum-fall-distance", 3.0));
-        alertCooldownNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.no-fall.alert-cooldown-ms", 2000L)) * 1_000_000L;
+        // Never let the configured threshold drop below four blocks.
+        minimumFallDistance = Math.max(4.0,
+                plugin.getConfig().getDouble("checks.no-fall.minimum-fall-distance", 4.0));
         setbackEnabled = plugin.getConfig().getBoolean("checks.no-fall.setback.enabled", true);
         safePositionMaxAgeMillis = Math.max(1000L,
                 plugin.getConfig().getLong("checks.no-fall.setback.safe-position-max-age-ms", 30000L));
@@ -146,28 +144,23 @@ public final class NoFallCheck implements Listener {
                         episode.lowestY = Math.min(episode.lowestY, location.getY());
                     }
 
-                    // Repeated client onGround claims while the collision probe
-                    // still proves the player is airborne are a direct NoFall signal.
+                    // Repeated onGround=true claims while the server collision
+                    // probe says AIRBORNE are flagged immediately once the real
+                    // fall distance reaches four blocks. Further claims escalate VL.
                     if (episode.falling && !episode.landingPending
-                            && episode.clientGroundClaims >= requiredGroundPackets
-                            && episode.firstClientGroundClaimNanos > 0L
-                            && now - episode.firstClientGroundClaimNanos <= packetWindowNanos
                             && player.getPing() <= maxPingMs) {
                         double measuredFall = Math.max(0.0,
                                 episode.peakY - Math.min(episode.lowestY, location.getY()));
+                        boolean repeatedFalseGround = episode.clientGroundClaims >= requiredGroundPackets
+                                && episode.firstClientGroundClaimNanos > 0L
+                                && now - episode.firstClientGroundClaimNanos <= packetWindowNanos;
                         if (measuredFall >= minimumFallDistance) {
-                            episode.landingPending = true;
-                            episode.landingFallDistance = measuredFall;
-                            episode.landingLocation = location.clone();
-                            long token = ++episode.episodeId;
-                            Location safe = episode.safePosition == null
-                                    ? copyLocation(lastSafePositions.get(id))
-                                    : episode.safePosition.clone();
-                            long safeAt = episode.safePositionAtMillis;
-                            World landingWorld = world;
-                            Bukkit.getScheduler().runTaskLater(plugin, () -> confirmLanding(
-                                    id, token, landingWorld, measuredFall, safe, safeAt, now),
-                                    LANDING_CONFIRM_TICKS);
+                            if (!episode.suspicionFlagged && repeatedFalseGround) {
+                                flagSuspicion(player, episode, measuredFall);
+                            } else if (episode.suspicionFlagged
+                                    && episode.totalClientGroundClaims >= episode.nextSuspicionClaim) {
+                                escalateSuspicion(player, episode, measuredFall);
+                            }
                         }
                     }
                     continue;
@@ -179,7 +172,7 @@ public final class NoFallCheck implements Listener {
                             Math.max(0.0, episode.peakY - location.getY()));
                     episode.falling = false;
 
-                    if (!safeLanding && measuredFall > minimumFallDistance) {
+                    if (!safeLanding && measuredFall >= minimumFallDistance) {
                         episode.landingPending = true;
                         episode.landingFallDistance = measuredFall;
                         episode.landingLocation = location.clone();
@@ -266,6 +259,8 @@ public final class NoFallCheck implements Listener {
                 }
             }
             if (episode.falling && clientOnGround) {
+                episode.totalClientGroundClaims = Math.min(Integer.MAX_VALUE,
+                        episode.totalClientGroundClaims + 1);
                 if (episode.firstClientGroundClaimNanos == 0L
                         || packetNow - episode.firstClientGroundClaimNanos > packetWindowNanos) {
                     episode.firstClientGroundClaimNanos = packetNow;
@@ -275,6 +270,8 @@ public final class NoFallCheck implements Listener {
                             episode.clientGroundClaims + 1);
                 }
             } else if (episode.falling) {
+                // Reset only the short confirmation window. Keep the episode-wide
+                // total so repeated spoof bursts continue escalating the violation.
                 episode.firstClientGroundClaimNanos = 0L;
                 episode.clientGroundClaims = 0;
             }
@@ -297,17 +294,29 @@ public final class NoFallCheck implements Listener {
         if (episode == null) {
             return;
         }
-        // A spoofed onGround bit can make the server emit a FALL event
-        // before the player's hitbox has physically reached a supporting block.
-        // Only a damage event concurrent with real support proves a normal landing.
-        if (!hasSolidSupport(player)) {
-            return;
-        }
+        // Defer confirmation by one tick. A spoofed ground packet can make
+        // Bukkit emit FALL while the player is still airborne; accept the event
+        // only if the server collision probe confirms support on the next tick.
+        long token;
         synchronized (episode) {
-            if (episode.falling || episode.landingPending) {
-                episode.fallDamageSeen = true;
+            if (!episode.falling && !episode.landingPending) {
+                return;
             }
+            token = episode.episodeId;
+            episode.fallDamageCandidate = true;
         }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Player current = Bukkit.getPlayer(player.getUniqueId());
+            if (current == null || !current.isOnline() || !hasSolidSupport(current)) {
+                return;
+            }
+            synchronized (episode) {
+                if (episode.episodeId == token
+                        && (episode.falling || episode.landingPending)) {
+                    episode.fallDamageSeen = true;
+                }
+            }
+        }, 1L);
     }
 
     private void confirmLanding(UUID id, long episodeId, World landingWorld,
@@ -354,18 +363,16 @@ public final class NoFallCheck implements Listener {
             episode.landingPending = false;
             episode.falling = false;
             episode.violationHandled = true;
-            vl = violations.merge(id, 1, (current, one) ->
-                    current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+            int increment = episode.suspicionFlagged ? 2 : 1;
+            vl = violations.merge(id, increment, (current, add) ->
+                    current > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : current + add);
         }
 
         boolean setbackApplied = applySetback(player, safePosition, safePositionAtMillis);
         double appliedDamage = applyFallDamage(player, finalFallDistance);
 
-        long now = System.nanoTime();
-        if (now - episode.lastAlertNanos >= alertCooldownNanos) {
-            episode.lastAlertNanos = now;
-            plugin.getAlertManager().send("NoFall", player, vl);
-        }
+        episode.lastAlertNanos = System.nanoTime();
+        plugin.getAlertManager().send("NoFall", player, vl);
         if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
                     "NoFall confirmed for %s (VL=%d, fallDistance=%.2f, clientGroundClaims=%d, setback=%s, damage=%.1f)",
@@ -375,6 +382,36 @@ public final class NoFallCheck implements Listener {
 
         synchronized (episode) {
             episode.resetTracking();
+        }
+    }
+
+    private void flagSuspicion(Player player, FallEpisode episode, double fallDistance) {
+        UUID id = player.getUniqueId();
+        int vl = violations.merge(id, 1, (current, one) ->
+                current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+        episode.suspicionFlagged = true;
+        episode.nextSuspicionClaim = episode.totalClientGroundClaims + 5;
+        episode.lastAlertNanos = System.nanoTime();
+        plugin.getAlertManager().send("NoFall", player, vl);
+        if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
+            plugin.getLogger().info(String.format(java.util.Locale.ROOT,
+                    "NoFall suspicion for %s (VL=%d, airborneFalseGround=%d, fallDistance=%.2f)",
+                    player.getName(), vl, episode.totalClientGroundClaims, fallDistance));
+        }
+    }
+
+    private void escalateSuspicion(Player player, FallEpisode episode, double fallDistance) {
+        int additional = 1 + Math.max(0,
+                (episode.totalClientGroundClaims - episode.nextSuspicionClaim) / 5);
+        int vl = violations.merge(player.getUniqueId(), additional, (current, add) ->
+                current > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : current + add);
+        episode.nextSuspicionClaim += additional * 5;
+        episode.lastAlertNanos = System.nanoTime();
+        plugin.getAlertManager().send("NoFall", player, vl);
+        if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
+            plugin.getLogger().info(String.format(java.util.Locale.ROOT,
+                    "NoFall repeated suspicion for %s (VL=%d, airborneFalseGround=%d, fallDistance=%.2f)",
+                    player.getName(), vl, episode.totalClientGroundClaims, fallDistance));
         }
     }
 
@@ -421,7 +458,7 @@ public final class NoFallCheck implements Listener {
         return applied;
     }
 
-    /** Vanilla-style damage: one point per block beyond three blocks. */
+    /** Vanilla fall formula: ceil(distance - 3), applied once after confirmed suppression. */
     private double applyFallDamage(Player player, double fallDistance) {
         if (!damageEnabled || !plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true)
                 || player.isDead() || !Double.isFinite(fallDistance)) {
@@ -573,10 +610,14 @@ public final class NoFallCheck implements Listener {
         private boolean falling;
         private boolean landingPending;
         private boolean fallDamageSeen;
+        private boolean fallDamageCandidate;
         private boolean violationHandled;
+        private boolean suspicionFlagged;
         private boolean lastClientOnGround;
         private boolean hasPacketY;
         private int clientGroundClaims;
+        private int totalClientGroundClaims;
+        private int nextSuspicionClaim;
         private World world;
         private Location safePosition;
         private Location landingLocation;
@@ -593,10 +634,14 @@ public final class NoFallCheck implements Listener {
             falling = false;
             landingPending = false;
             fallDamageSeen = false;
+            fallDamageCandidate = false;
             violationHandled = false;
+            suspicionFlagged = false;
             hasPacketY = false;
             firstClientGroundClaimNanos = 0L;
             clientGroundClaims = 0;
+            totalClientGroundClaims = 0;
+            nextSuspicionClaim = 0;
             world = null;
             safePosition = null;
             landingLocation = null;
