@@ -30,6 +30,7 @@ public final class NoWebCheck implements Listener {
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
     private final Map<UUID, Long> pearlGraceUntilNanos = new HashMap<>();
+    private final Set<UUID> pearlBaselinePending = new java.util.HashSet<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastPacketLocations = new HashMap<>();
@@ -116,7 +117,13 @@ public final class NoWebCheck implements Listener {
         // Ender Pearl teleports can place a player directly into a cobweb.
         // Ignore packet displacement during the post-teleport settling window
         // and keep the packet baseline at the destination to avoid stale deltas.
-        if (isInsidePearlGrace(id, now)) {
+        if (isInsidePearlGrace(id, System.nanoTime())) {
+            pearlBaselinePending.remove(id);
+            states.remove(id);
+            lastPacketLocations.put(id, to.clone());
+            return;
+        }
+        if (pearlBaselinePending.remove(id)) {
             states.remove(id);
             lastPacketLocations.put(id, to.clone());
             return;
@@ -229,12 +236,14 @@ public final class NoWebCheck implements Listener {
                     plugin.getConfig().getLong("checks.no-web.pearl-grace-ms", 1500L)));
             pearlGraceUntilNanos.put(id,
                     System.nanoTime() + graceMillis * 1_000_000L);
+            pearlBaselinePending.add(id);
             Location destination = event.getTo();
             if (destination != null) {
                 lastPacketLocations.put(id, destination.clone());
             }
         } else {
             pearlGraceUntilNanos.remove(id);
+            pearlBaselinePending.remove(id);
         }
 
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
@@ -393,6 +402,7 @@ public final class NoWebCheck implements Listener {
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
         pearlGraceUntilNanos.remove(id);
+        pearlBaselinePending.remove(id);
         lastPacketLocations.remove(id);
         packetPositions.remove(id);
     }
@@ -401,6 +411,7 @@ public final class NoWebCheck implements Listener {
         states.clear();
         elytraGraceUntilNanos.clear();
         pearlGraceUntilNanos.clear();
+        pearlBaselinePending.clear();
         lastPacketLocations.clear();
         packetPositions.clear();
         applyingCorrection.clear();
