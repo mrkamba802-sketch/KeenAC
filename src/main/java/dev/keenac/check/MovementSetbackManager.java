@@ -133,7 +133,6 @@ public final class MovementSetbackManager implements Listener {
             return false;
         }
 
-        player.setVelocity(ZERO_VELOCITY.clone());
         long lockMillis = Math.max(0L,
                 plugin.getConfig().getLong("checks.movement-setback.correction-lock-ms", 120L));
         Location correctedPosition = player.getLocation().clone();
@@ -141,9 +140,23 @@ public final class MovementSetbackManager implements Listener {
         correctionLockUntil.put(id, now + lockMillis);
         lastSetbackAt.put(id, now);
         lastValidLocations.put(id, correctedPosition);
+        player.setVelocity(ZERO_VELOCITY.clone());
 
         plugin.getLogger().fine("Applied " + safeCheckName(checkName)
                 + " movement rubberband to " + player.getName() + ".");
+        return true;
+    }
+
+    public boolean isCorrectionLocked(UUID playerId) {
+        Long until = correctionLockUntil.get(playerId);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            correctionLockUntil.remove(playerId);
+            correctionLocks.remove(playerId);
+            return false;
+        }
         return true;
     }
 
