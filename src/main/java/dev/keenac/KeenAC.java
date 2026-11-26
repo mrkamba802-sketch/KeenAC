@@ -80,7 +80,7 @@ public final class KeenAC extends JavaPlugin {
         scaffoldCheck = new ScaffoldCheck(this);
         packetListener = new PacketAirStuckListener(airStuckCheck, motionCheck);
         invHitPacketListener = new PacketInvHitListener(this, invHitCheck);
-        autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck, ghostMenuCheck);
+        autoSwapPacketListener = new PacketAutoSwapListener(inventoryAutoSwapCheck);
         aimPacketListener = new PacketAimListener(aimCheck);
         reachPacketListener = new PacketReachListener(reachCheck);
         baritonePacketListener = new PacketBaritoneListener(baritoneCheck);
