@@ -50,6 +50,9 @@ public final class NoFallCheck implements Listener {
     private volatile boolean setbackEnabled = true;
     private volatile long safePositionMaxAgeMillis = 30_000L;
     private volatile boolean damageEnabled = true;
+    private volatile long packetWindowNanos = 1_000_000_000L;
+    private volatile int requiredGroundPackets = 3;
+    private volatile int maxPingMs = 250;
 
     public NoFallCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -68,6 +71,13 @@ public final class NoFallCheck implements Listener {
         safePositionMaxAgeMillis = Math.max(1000L,
                 plugin.getConfig().getLong("checks.no-fall.setback.safe-position-max-age-ms", 30000L));
         damageEnabled = plugin.getConfig().getBoolean("checks.no-fall.damage.enabled", true);
+        packetWindowNanos = Math.max(250L,
+                plugin.getConfig().getLong("checks.no-fall.packet-window-ms", 1000L))
+                * 1_000_000L;
+        requiredGroundPackets = Math.max(2,
+                plugin.getConfig().getInt("checks.no-fall.required-ground-packets", 3));
+        maxPingMs = Math.max(0,
+                plugin.getConfig().getInt("checks.no-fall.max-ping-ms", 250));
 
         if (!enabled) {
             episodes.clear();
@@ -85,8 +95,8 @@ public final class NoFallCheck implements Listener {
             World world = location.getWorld();
             boolean exemptMode = !player.isOnline() || !player.isValid() || player.isDead()
                     || player.isInsideVehicle() || player.isFlying() || player.isGliding()
-                    || player.isSwimming() || player.isRiptiding() || player.isInWater()
-                    || player.isInLava()
+                    || player.isSwimming() || player.isRiptiding() || player.isClimbing()
+                    || player.isInWater() || player.isInLava()
                     || player.getGameMode() == GameMode.CREATIVE
                     || player.getGameMode() == GameMode.SPECTATOR
                     || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
@@ -139,6 +149,11 @@ public final class NoFallCheck implements Listener {
                         episode.lowestY = Math.min(episode.lowestY, location.getY());
                     }
 
+                    if (episode.falling && player.getPing() <= maxPingMs) {
+                        double measuredFall = Math.max(0.0,
+                                episode.peakY - Math.min(episode.lowestY, location.getY()));
+                        evaluateGroundClaims(player, episode, measuredFall, now);
+                    }
                     continue;
                 }
 
@@ -146,6 +161,9 @@ public final class NoFallCheck implements Listener {
                     double measuredFall = Math.max(
                             player.getFallDistance(),
                             Math.max(0.0, episode.peakY - location.getY()));
+                    if (player.getPing() <= maxPingMs) {
+                        evaluateGroundClaims(player, episode, measuredFall, now);
+                    }
                     episode.falling = false;
 
                     if (!safeLanding && measuredFall >= minimumFallDistance - 0.05) {
@@ -190,10 +208,9 @@ public final class NoFallCheck implements Listener {
     }
 
     /**
-     * PacketEvents still feeds the client ground flag and Y coordinate. They
-     * are retained as diagnostics only. They never create a violation by
-     * themselves; a NoFall alert requires a confirmed landing without vanilla
-     * FALL damage.
+     * PacketEvents supplies client ground claims and Y coordinates. Repeated
+     * ground claims are checked against the independent server fall trajectory
+     * on the main thread before they can raise a violation.
      */
     public void recordPacketOnGround(UUID id, boolean clientOnGround,
                                      boolean hasPosition, double packetY) {
@@ -203,6 +220,7 @@ public final class NoFallCheck implements Listener {
         FallEpisode episode = episodes.computeIfAbsent(id, ignored -> new FallEpisode());
         synchronized (episode) {
             episode.lastClientOnGround = clientOnGround;
+            long packetNow = System.nanoTime();
             if (hasPosition && Double.isFinite(packetY)) {
                 if (!episode.hasPacketY) {
                     episode.packetPeakY = packetY;
@@ -236,10 +254,19 @@ public final class NoFallCheck implements Listener {
                 }
             }
             if (episode.falling && clientOnGround) {
-                // Diagnostic only: a ground claim while airborne is not proof of
-                // NoFall because vanilla clients can send transient ground flags.
                 episode.totalClientGroundClaims = Math.min(Integer.MAX_VALUE,
                         episode.totalClientGroundClaims + 1);
+                if (episode.firstClientGroundClaimNanos == 0L
+                        || packetNow - episode.firstClientGroundClaimNanos > packetWindowNanos) {
+                    episode.firstClientGroundClaimNanos = packetNow;
+                    episode.clientGroundClaims = 1;
+                } else {
+                    episode.clientGroundClaims = Math.min(Integer.MAX_VALUE,
+                            episode.clientGroundClaims + 1);
+                }
+            } else if (episode.falling) {
+                episode.firstClientGroundClaimNanos = 0L;
+                episode.clientGroundClaims = 0;
             }
         }
     }
@@ -303,8 +330,8 @@ public final class NoFallCheck implements Listener {
                 || !plugin.getConfig().getBoolean("checks.no-fall.enabled", true)
                 || player.getWorld() != landingWorld
                 || player.isInsideVehicle() || player.isFlying() || player.isGliding()
-                || player.isSwimming() || player.isRiptiding() || player.isInWater()
-                || player.isInLava() || !hasSolidSupport(player)
+                || player.isSwimming() || player.isRiptiding() || player.isClimbing()
+                || player.isInWater() || player.isInLava() || !hasSolidSupport(player)
                 || player.getGameMode() == GameMode.CREATIVE
                 || player.getGameMode() == GameMode.SPECTATOR
                 || player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
@@ -348,7 +375,7 @@ public final class NoFallCheck implements Listener {
             episode.landingPending = false;
             episode.falling = false;
             episode.violationHandled = true;
-            int increment = 1;
+            int increment = episode.suspicionFlagged ? 2 : 1;
             vl = violations.merge(id, increment, (current, add) ->
                     current > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : current + add);
         }
@@ -366,6 +393,41 @@ public final class NoFallCheck implements Listener {
 
         synchronized (episode) {
             episode.resetTracking();
+        }
+    }
+
+    private void evaluateGroundClaims(Player player, FallEpisode episode,
+                                      double measuredFall, long now) {
+        if (measuredFall < minimumFallDistance - 0.05
+                || episode.clientGroundClaims < requiredGroundPackets
+                || episode.firstClientGroundClaimNanos == 0L
+                || now - episode.firstClientGroundClaimNanos > packetWindowNanos) {
+            return;
+        }
+
+        if (!episode.suspicionFlagged) {
+            int vl = violations.merge(player.getUniqueId(), 1, (current, one) ->
+                    current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
+            episode.suspicionFlagged = true;
+            episode.nextSuspicionClaim = episode.totalClientGroundClaims + 5;
+            plugin.getAlertManager().send("NoFall", player, vl);
+            if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
+                plugin.getLogger().info(String.format(java.util.Locale.ROOT,
+                        "NoFall airborne suspicion for %s (VL=%d, consecutiveGroundClaims=%d, fallDistance=%.2f)",
+                        player.getName(), vl, episode.clientGroundClaims, measuredFall));
+            }
+        } else if (episode.totalClientGroundClaims >= episode.nextSuspicionClaim) {
+            int additional = 1 + Math.max(0,
+                    (episode.totalClientGroundClaims - episode.nextSuspicionClaim) / 5);
+            int vl = violations.merge(player.getUniqueId(), additional, (current, add) ->
+                    current > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : current + add);
+            episode.nextSuspicionClaim += additional * 5;
+            plugin.getAlertManager().send("NoFall", player, vl);
+            if (plugin.getConfig().getBoolean("checks.no-fall.log-context", true)) {
+                plugin.getLogger().info(String.format(java.util.Locale.ROOT,
+                        "NoFall repeated suspicion for %s (VL=%d, groundClaims=%d, fallDistance=%.2f)",
+                        player.getName(), vl, episode.totalClientGroundClaims, measuredFall));
+            }
         }
     }
 
@@ -448,26 +510,33 @@ public final class NoFallCheck implements Listener {
     private boolean hasSolidSupport(Player player) {
         BoundingBox box = player.getBoundingBox();
         double feetY = box.getMinY();
-        BoundingBox probe = new BoundingBox(
-                box.getMinX() + 0.01, feetY - 0.01, box.getMinZ() + 0.01,
-                box.getMaxX() - 0.01, feetY + 0.001, box.getMaxZ() - 0.01);
 
-        int minX = floor(probe.getMinX());
-        int maxX = floor(probe.getMaxX());
-        int minY = floor(probe.getMinY()) - 1;
-        int maxY = floor(probe.getMaxY());
-        int minZ = floor(probe.getMinZ());
-        int maxZ = floor(probe.getMaxZ());
+        int minX = floor(box.getMinX() + 0.01);
+        int maxX = floor(box.getMaxX() - 0.01);
+        int minY = floor(feetY - 0.16) - 1;
+        int maxY = floor(feetY + 0.03);
+        int minZ = floor(box.getMinZ() + 0.01);
+        int maxZ = floor(box.getMaxZ() - 0.01);
 
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     Block block = player.getWorld().getBlockAt(x, y, z);
-                    // Block#getCollisionShape() is expressed in block-local
-                    // coordinates. Calculate the shape at its world location
-                    // before comparing it to the player's world-space hitbox.
-                    if (block.getBlockData().getCollisionShape(block.getLocation()).overlaps(probe)) {
-                        return true;
+                    for (BoundingBox shape : block.getBlockData()
+                            .getCollisionShape(block.getLocation()).getBoundingBoxes()) {
+                        double top = shape.getMaxY();
+                        // Support must be an actual top face immediately below
+                        // the player's feet; touching the side of a wall is not support.
+                        if (top > feetY + 0.03 || top < feetY - 0.16) {
+                            continue;
+                        }
+                        boolean overlapsX = shape.getMaxX() > box.getMinX() + 0.01
+                                && shape.getMinX() < box.getMaxX() - 0.01;
+                        boolean overlapsZ = shape.getMaxZ() > box.getMinZ() + 0.01
+                                && shape.getMinZ() < box.getMaxZ() - 0.01;
+                        if (overlapsX && overlapsZ) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -567,6 +636,7 @@ public final class NoFallCheck implements Listener {
         private long episodeId;
         private long startedAtNanos;
         private long lastPacketNanos;
+        private long firstClientGroundClaimNanos;
         private long safePositionAtMillis;
         private long lastAlertNanos;
         private double fallStartY;
@@ -582,6 +652,9 @@ public final class NoFallCheck implements Listener {
         private boolean lastClientOnGround;
         private boolean hasPacketY;
         private int totalClientGroundClaims;
+        private int clientGroundClaims;
+        private int nextSuspicionClaim;
+        private boolean suspicionFlagged;
         private World world;
         private Location safePosition;
         private Location landingLocation;
@@ -601,6 +674,10 @@ public final class NoFallCheck implements Listener {
             violationHandled = false;
             hasPacketY = false;
             totalClientGroundClaims = 0;
+            clientGroundClaims = 0;
+            firstClientGroundClaimNanos = 0L;
+            nextSuspicionClaim = 0;
+            suspicionFlagged = false;
             world = null;
             safePosition = null;
             landingLocation = null;
