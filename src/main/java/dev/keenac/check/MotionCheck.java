@@ -628,21 +628,28 @@ public final class MotionCheck implements Listener {
     private double getSurfaceMovementMultiplier(Player player, Location location) {
         Material surface = location.clone().subtract(0.0, 0.2, 0.0).getBlock().getType();
         String name = surface.name();
+        if (surface == Material.BLUE_ICE) {
+            return 1.02;
+        }
         if (name.contains("ICE")) {
-            // Ice keeps momentum longer; allow a modest transition/inertia margin.
-            return 1.12;
+            return 0.97;
         }
         if (name.contains("SLIME")) {
-            // Slime contact can produce short legitimate horizontal impulses.
-            return 1.10;
+            // Slime is slower to walk on; airborne bounce movement has its own margin.
+            return player.isOnGround() ? 0.70 : 1.10;
         }
         if (name.contains("HONEY")) {
-            return 0.70;
+            return 0.58;
         }
-        if (surface == Material.SOUL_SAND || surface == Material.SOUL_SOIL) {
+        if (surface == Material.SOUL_SAND) {
             var boots = player.getInventory().getBoots();
             int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
-            return Math.min(1.0, 0.55 + 0.15 * soulSpeed);
+            return soulSpeed > 0 ? 1.0 : 0.58;
+        }
+        if (surface == Material.SOUL_SOIL) {
+            var boots = player.getInventory().getBoots();
+            int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
+            return soulSpeed > 0 ? 1.0 : 1.0;
         }
         return 1.0;
     }
