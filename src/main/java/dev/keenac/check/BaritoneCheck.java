@@ -264,7 +264,8 @@ public final class BaritoneCheck implements Listener {
                         || plugin.getAlertManager() == null) {
                     return;
                 }
-                plugin.getAlertManager().send("Baritone", player, vl);
+                plugin.getAlertManager().send("Baritone", player, vl,
+                        "Repeated ground-navigation turns matched a consistent automated-looking route pattern.");
                 if (logContext) {
                     plugin.getLogger().warning(String.format(java.util.Locale.ROOT,
                             "Baritone movement-pattern review for %s (VL=%d, repeated turns=%d)",
