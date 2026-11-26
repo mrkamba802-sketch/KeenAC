@@ -4,16 +4,16 @@
 checks:
   air-stuck:
     enabled: true
-    # Consecutive server ticks with no position change while server-side
-    # vertical velocity confirms the player should be falling.
-    stationary-ticks: 40
-    # Extra consecutive confirmed samples required before AirStuck flags.
-    confirm-samples: 5
+    # Faster confirmation while still requiring stable ping and downward velocity.
+    stationary-ticks: 24
+    # Consecutive confirmed samples required before block actions are restricted.
+    confirm-samples: 2
     movement-tolerance: 0.02
     velocity-tolerance: 0.18
     max-ping-ms: 250
-    # AirStuck is alert-only: it never blocks actions or changes the player's camera.
-    cancel-actions: false
+    # Cancel block breaking and placement while a confirmed AirStuck flag is active.
+    # Other actions and movement are not affected.
+    cancel-actions: true
     shake-player: false
     shake-strength: 0.0
     # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
@@ -42,6 +42,24 @@ checks:
     max-move-distance: 0.08
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
     elytra-grace-ms: 2500
+
+  ghost-menu:
+    enabled: true
+    # Ignore momentum immediately after opening a container or clicking the E-inventory.
+    open-grace-ms: 1200
+    # Recheck movement after velocity changes or damage to avoid knockback false positives.
+    velocity-grace-ms: 1000
+    # Require sustained sprint-like movement, not a single movement packet.
+    require-sprint: true
+    minimum-horizontal-speed: 3.4
+    required-samples: 6
+    required-duration-ms: 350
+    required-distance: 1.2
+    sample-window-ms: 1200
+    max-ping-ms: 250
+    # The E-inventory is client-side; detection is best-effort after window-0 clicks.
+    personal-inventory-window-ms: 2200
+    alert-cooldown-ms: 5000
 
   auto-swap:
     enabled: true
