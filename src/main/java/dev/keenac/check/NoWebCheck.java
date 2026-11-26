@@ -145,9 +145,7 @@ public final class NoWebCheck implements Listener {
 
         // These movement modes have additional physics that this web-specific
         // horizontal/vertical envelope does not model reliably.
-        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()
-                || player.hasPotionEffect(PotionEffectType.LEVITATION)
-                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)) {
+        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()) {
             states.remove(id);
             lastPacketLocations.put(id, to.clone());
             return;
@@ -161,7 +159,11 @@ public final class NoWebCheck implements Listener {
         // Cobwebs also slow falling, but vertical motion is not the same as
         // horizontal walking speed. Keep a separate, deliberately broader
         // vanilla fall/jump envelope so ordinary descent is never flagged.
-        double maxVerticalDistance = 0.08 * elapsedTicks + 0.005;
+        boolean modifiedVerticalPhysics = player.hasPotionEffect(PotionEffectType.LEVITATION)
+                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
+                || player.hasPotionEffect(PotionEffectType.JUMP_BOOST);
+        double maxVerticalDistance = modifiedVerticalPhysics
+                ? Double.POSITIVE_INFINITY : 0.08 * elapsedTicks + 0.005;
         if (state != null) {
             state.lastMovementNanos = now;
         }
