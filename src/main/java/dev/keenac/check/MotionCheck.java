@@ -455,7 +455,11 @@ public final class MotionCheck implements Listener {
         if (player.isBlocking()) {
             stanceMultiplier *= 0.20;
         }
-        double airborneMultiplier = player.isOnGround() ? 1.0 : 1.08;
+        long jumpAt = lastJumpAt.getOrDefault(id, 0L);
+        boolean recentJump = jumpAt > 0L && now - jumpAt <= 600L;
+        // Sprint-jump gives a legitimate short horizontal impulse even without
+        // a PlayerVelocityEvent. Give only that short window extra headroom.
+        double airborneMultiplier = player.isOnGround() ? 1.0 : recentJump ? 1.22 : 1.08;
         double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier
                 * stanceMultiplier * surfaceMultiplier * airborneMultiplier;
 
