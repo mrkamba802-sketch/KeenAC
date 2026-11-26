@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.Location;
 import org.bukkit.potion.PotionEffectType;
@@ -219,6 +220,11 @@ public final class NoSlowCheck implements Listener {
         pendingConsumeCancellation.remove(id);
         usingItems.remove(id);
         lastInterruptionAlertNanos.remove(id);
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        clear(event.getPlayer().getUniqueId());
     }
 
     public void clear(UUID id) {
