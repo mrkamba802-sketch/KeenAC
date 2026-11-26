@@ -14,6 +14,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 public final class AlertManager {
     private static final String CHECK_MARKER = "\u0001KEENAC_CHECK\u0001";
@@ -21,6 +26,16 @@ public final class AlertManager {
     private final KeenAC plugin;
     private final Set<UUID> enabled = new HashSet<>();
     private final Map<AlertKey, Integer> alertLevels = new ConcurrentHashMap<>();
+    private final Map<AlertKey, DeliveryState> deliveryStates = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService cooldownScheduler = Executors.newSingleThreadScheduledExecutor(
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable task) {
+                    Thread thread = new Thread(task, "KeenAC-AlertCooldown");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
 
     public AlertManager(KeenAC plugin) {
@@ -51,11 +66,109 @@ public final class AlertManager {
     }
 
     public void send(String checkName, Player suspect, int violationLevel, String reason) {
-        if (!plugin.getConfig().getBoolean("alerts.enabled", true)) return;
+        if (suspect == null || !plugin.getConfig().getBoolean("alerts.enabled", true)) return;
 
-        // Display the count of alerts actually emitted for this player/check.
-        // Check-local counters may decay or advance while a cooldown suppresses
-        // delivery, so they must not control the visible xN sequence.
+        UUID playerId = suspect.getUniqueId();
+        AlertKey key = new AlertKey(playerId, checkName);
+        DeliveryState state = deliveryStates.computeIfAbsent(key, ignored -> new DeliveryState());
+        PendingAlert immediate = null;
+        long now = System.nanoTime();
+        long cooldownNanos = Math.max(0L,
+                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1_000_000_000L;
+
+        synchronized (state) {
+            long remaining = state.lastSentNanos == 0L
+                    ? 0L : cooldownNanos - (now - state.lastSentNanos);
+            if (remaining <= 0L) {
+                state.lastSentNanos = now;
+                state.pending = null;
+                if (state.scheduled != null) {
+                    state.scheduled.cancel(false);
+                    state.scheduled = null;
+                }
+                immediate = new PendingAlert(playerId, checkName, reason);
+            } else {
+                // Keep the latest context while the same player/check is cooling down.
+                // This guarantees a one-shot violation is delivered after the real-time delay.
+                state.pending = new PendingAlert(playerId, checkName, reason);
+                if (state.scheduled == null || state.scheduled.isDone()) {
+                    schedulePending(key, state, remaining);
+                }
+            }
+        }
+
+        if (immediate != null) {
+            dispatch(immediate);
+        }
+    }
+
+    private void schedulePending(AlertKey key, DeliveryState state, long delayNanos) {
+        state.scheduled = cooldownScheduler.schedule(() -> {
+            if (!plugin.isEnabled()) return;
+            try {
+                Bukkit.getScheduler().runTask(plugin, () -> flushPending(key, state));
+            } catch (IllegalStateException ignored) {
+                // The plugin may be shutting down while a cooldown is expiring.
+            }
+        }, Math.max(1L, delayNanos), TimeUnit.NANOSECONDS);
+    }
+
+    private void flushPending(AlertKey key, DeliveryState state) {
+        if (!plugin.isEnabled() || !plugin.getConfig().getBoolean("alerts.enabled", true)) {
+            synchronized (state) {
+                state.pending = null;
+                state.scheduled = null;
+            }
+            return;
+        }
+
+        PendingAlert pending;
+        synchronized (state) {
+            pending = state.pending;
+            if (pending == null) {
+                state.scheduled = null;
+                return;
+            }
+
+            long now = System.nanoTime();
+            long cooldownNanos = Math.max(0L,
+                    plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1_000_000_000L;
+            long remaining = state.lastSentNanos == 0L
+                    ? 0L : cooldownNanos - (now - state.lastSentNanos);
+            if (remaining > 0L) {
+                schedulePending(key, state, remaining);
+                return;
+            }
+
+            state.lastSentNanos = now;
+            state.pending = null;
+            state.scheduled = null;
+        }
+
+        dispatch(pending);
+    }
+
+    private void dispatch(PendingAlert pending) {
+        Runnable deliver = () -> {
+            Player suspect = Bukkit.getPlayer(pending.playerId);
+            if (suspect != null && suspect.isOnline()
+                    && plugin.getConfig().getBoolean("alerts.enabled", true)) {
+                emit(pending.checkName, suspect, pending.reason);
+            }
+        };
+        if (Bukkit.isPrimaryThread()) {
+            deliver.run();
+        } else {
+            try {
+                Bukkit.getScheduler().runTask(plugin, deliver);
+            } catch (IllegalStateException ignored) {
+                // The plugin may be shutting down before this delivery runs.
+            }
+        }
+    }
+
+    private void emit(String checkName, Player suspect, String reason) {
+        // The x1, x2, x3 sequence advances only when an alert is actually emitted.
         AlertKey key = new AlertKey(suspect.getUniqueId(), checkName);
         int alertLevel = alertLevels.merge(key, 1, (current, one) ->
                 current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1);
@@ -121,12 +234,38 @@ public final class AlertManager {
         UUID id = player.getUniqueId();
         enabled.remove(id);
         alertLevels.keySet().removeIf(key -> key.playerId().equals(id));
+        deliveryStates.entrySet().removeIf(entry -> {
+            if (!entry.getKey().playerId().equals(id)) return false;
+            synchronized (entry.getValue()) {
+                if (entry.getValue().scheduled != null) {
+                    entry.getValue().scheduled.cancel(false);
+                }
+                entry.getValue().pending = null;
+            }
+            return true;
+        });
     }
 
     public void clearAll() {
         enabled.clear();
         alertLevels.clear();
+        deliveryStates.values().forEach(state -> {
+            synchronized (state) {
+                if (state.scheduled != null) state.scheduled.cancel(false);
+                state.pending = null;
+                state.scheduled = null;
+            }
+        });
+        deliveryStates.clear();
+        cooldownScheduler.shutdownNow();
     }
 
     private record AlertKey(UUID playerId, String checkName) { }
+    private record PendingAlert(UUID playerId, String checkName, String reason) { }
+
+    private static final class DeliveryState {
+        private long lastSentNanos;
+        private PendingAlert pending;
+        private ScheduledFuture<?> scheduled;
+    }
 }
