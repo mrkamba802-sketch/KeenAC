@@ -489,7 +489,7 @@ public final class GhostMenuCheck implements Listener {
         if (!player.isValid() || player.isDead()
                 || player.getGameMode() == GameMode.CREATIVE
                 || player.getGameMode() == GameMode.SPECTATOR
-                || player.isFlying() || player.isInsideVehicle
+                || player.isFlying() || player.isInsideVehicle()
                 || player.isGliding() || player.isSwimming()
                 || player.isClimbing() || player.isRiptiding()
                 || player.isInWater() || player.isInLava()
