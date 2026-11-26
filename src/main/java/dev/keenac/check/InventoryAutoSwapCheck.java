@@ -95,7 +95,8 @@ public final class InventoryAutoSwapCheck implements Listener {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player player = Bukkit.getPlayer(playerId);
             if (player != null && player.isOnline() && enabled) {
-                plugin.getAlertManager().send("AutoSwap", player, vl);
+                plugin.getAlertManager().send("AutoSwap", player, vl,
+                        "The player performed rapid hotbar or offhand slot swaps above the configured threshold.");
             }
         });
     }
