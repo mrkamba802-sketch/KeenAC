@@ -61,7 +61,6 @@ public final class MotionCheck implements Listener {
     private volatile int elytraPacketMaxPing = 250;
     private volatile double elytraPacketMaxBps = 45.1;
     private volatile int elytraPacketConfirmSamples = 2;
-    private volatile long elytraPacketCooldownNanos = 1_500_000_000L;
     private final Map<UUID, Integer> elytraViolationLevels = new HashMap<>();
     private final Map<UUID, Location> samplePositions = new HashMap<>();
     private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
@@ -175,9 +174,6 @@ public final class MotionCheck implements Listener {
                 plugin.getConfig().getDouble("checks.elytra-speed.max-bps", 45.1)));
         elytraPacketConfirmSamples = Math.max(1,
                 plugin.getConfig().getInt("checks.elytra-speed.confirm-samples", 2));
-        elytraPacketCooldownNanos = Math.max(250L,
-                plugin.getConfig().getLong("checks.elytra-speed.alert-cooldown-ms", 1500L))
-                * 1_000_000L;
     }
 
     private void refreshElytraPacketEligibility(Player player) {
@@ -214,7 +210,6 @@ public final class MotionCheck implements Listener {
         long nowNanos = System.nanoTime();
         double threshold = elytraPacketMaxBps;
         int required = elytraPacketConfirmSamples;
-        long cooldownNanos = elytraPacketCooldownNanos;
 
         ElytraPacketState state = elytraPacketStates.computeIfAbsent(
                 id, ignored -> new ElytraPacketState());
@@ -277,10 +272,8 @@ public final class MotionCheck implements Listener {
                 state.fastSamples = 0;
             }
 
-            if (state.fastSamples >= required
-                    && nowNanos - state.lastAlertNanos >= cooldownNanos) {
+            if (state.fastSamples >= required) {
                 state.fastSamples = 0;
-                state.lastAlertNanos = nowNanos;
                 violation = true;
             }
         }
@@ -301,7 +294,6 @@ public final class MotionCheck implements Listener {
     private static final class ElytraPacketState {
         private final Deque<ElytraPositionSample> positions = new ArrayDeque<>();
         private long lastPacketNanos;
-        private long lastAlertNanos;
         private int fastSamples;
     }
 
