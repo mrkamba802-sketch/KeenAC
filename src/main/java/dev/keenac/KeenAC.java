@@ -12,6 +12,7 @@ import dev.keenac.check.GhostMenuCheck;
 import dev.keenac.check.InvHitCheck;
 import dev.keenac.check.MotionCheck;
 import dev.keenac.check.WallHitCheck;
+import dev.keenac.check.WallInteractCheck;
 import dev.keenac.check.NoSlowCheck;
 import dev.keenac.check.NoWebCheck;
 import dev.keenac.check.ReachCheck;
@@ -41,6 +42,7 @@ public final class KeenAC extends JavaPlugin {
     private NoSlowCheck noSlowCheck;
     private NoWebCheck noWebCheck;
     private WallHitCheck wallHitCheck;
+    private WallInteractCheck wallInteractCheck;
     private InventoryAutoSwapCheck inventoryAutoSwapCheck;
     private GhostMenuCheck ghostMenuCheck;
     private InvHitCheck invHitCheck;
@@ -82,6 +84,7 @@ public final class KeenAC extends JavaPlugin {
         noSlowCheck = new NoSlowCheck(this);
         noWebCheck = new NoWebCheck(this);
         wallHitCheck = new WallHitCheck(this);
+        wallInteractCheck = new WallInteractCheck(this);
         inventoryAutoSwapCheck = new InventoryAutoSwapCheck(this);
         ghostMenuCheck = new GhostMenuCheck(this);
         invHitCheck = new InvHitCheck(this);
@@ -125,6 +128,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(baritoneCheck, this);
         Bukkit.getPluginManager().registerEvents(scaffoldCheck, this);
         Bukkit.getPluginManager().registerEvents(wallHitCheck, this);
+        Bukkit.getPluginManager().registerEvents(wallInteractCheck, this);
         Bukkit.getPluginManager().registerEvents(noSlowCheck, this);
         Bukkit.getPluginManager().registerEvents(noWebCheck, this);
 
@@ -202,6 +206,7 @@ public final class KeenAC extends JavaPlugin {
         if (noSlowCheck != null) noSlowCheck.clearAll();
         if (noWebCheck != null) noWebCheck.clearAll();
         if (wallHitCheck != null) wallHitCheck.clearAll();
+        if (wallInteractCheck != null) wallInteractCheck.clearAll();
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.clearAll();
         if (ghostMenuCheck != null) ghostMenuCheck.clearAll();
         if (invHitCheck != null) invHitCheck.clearAll();
