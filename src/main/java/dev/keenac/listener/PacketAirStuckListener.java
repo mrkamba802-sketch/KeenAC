@@ -8,20 +8,16 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientIn
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.MotionCheck;
-import dev.keenac.check.NoFallCheck;
 import org.bukkit.entity.Player;
 
 public final class PacketAirStuckListener extends PacketListenerAbstract {
     private final AirStuckCheck airStuckCheck;
     private final MotionCheck motionCheck;
-    private final NoFallCheck noFallCheck;
 
-    public PacketAirStuckListener(AirStuckCheck airStuckCheck, MotionCheck motionCheck,
-                                  NoFallCheck noFallCheck) {
+    public PacketAirStuckListener(AirStuckCheck airStuckCheck, MotionCheck motionCheck) {
         super(PacketListenerPriority.NORMAL);
         this.airStuckCheck = airStuckCheck;
         this.motionCheck = motionCheck;
-        this.noFallCheck = noFallCheck;
     }
 
     @Override
@@ -36,9 +32,6 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             com.github.retrooper.packetevents.protocol.world.Location packetLocation =
                     movement.getLocation();
             boolean hasPosition = movement.hasPositionChanged() && packetLocation != null;
-            noFallCheck.recordPacketOnGround(playerId, movement.isOnGround(), hasPosition,
-                    hasPosition ? packetLocation.getY() : Double.NaN);
-
             if (!hasPosition) {
                 return;
             }
