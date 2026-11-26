@@ -758,7 +758,6 @@ public final class GhostMenuCheck implements Listener {
             this.menuType = menuType;
             this.graceUntilNanos = now + graceNanos;
             this.externalMovementGraceUntilNanos = 0L;
-            this.postCloseUntilNanos = 0L;
             this.closedByCheck = false;
             this.lastPacketX = x;
             this.lastPacketY = y;
