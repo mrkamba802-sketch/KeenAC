@@ -49,8 +49,9 @@ checks:
     open-grace-ms: 1200
     # Recheck movement after velocity changes or damage to avoid knockback false positives.
     velocity-grace-ms: 1000
-    # Require sustained sprint-like movement, not a single movement packet.
-    require-sprint: true
+    # High packet-measured horizontal speed is the primary signal.
+    # Sprint state is not required because some clients report it inconsistently while a GUI is open.
+    require-sprint: false
     minimum-horizontal-speed: 3.4
     required-samples: 6
     required-duration-ms: 350
