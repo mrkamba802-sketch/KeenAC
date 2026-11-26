@@ -111,9 +111,8 @@ checks:
     enabled: true
     # Ignore short falls; confirm suspicious onGround claims against packet descent and fall-damage events.
     minimum-fall-distance: 3.0
-    # One confirmed onGround claim is enough once packet descent exceeds the limit;
-    # real fall damage is checked on the following server tick before any action.
-    required-packets: 1
+    # Require repeated onGround claims while the server collision check says the player is airborne.
+    required-packets: 2
     packet-window-ms: 750
     max-ping-ms: 250
     alert-cooldown-ms: 2000
