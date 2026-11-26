@@ -33,15 +33,13 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
         if (WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())) {
             WrapperPlayClientPlayerFlying movement = new WrapperPlayClientPlayerFlying(event);
             var playerId = player.getUniqueId();
-            noFallCheck.recordPacketOnGround(playerId, movement.isOnGround());
-
-            if (!movement.hasPositionChanged()) {
-                return;
-            }
-
             com.github.retrooper.packetevents.protocol.world.Location packetLocation =
                     movement.getLocation();
-            if (packetLocation == null) {
+            boolean hasPosition = movement.hasPositionChanged() && packetLocation != null;
+            noFallCheck.recordPacketOnGround(playerId, movement.isOnGround(), hasPosition,
+                    hasPosition ? packetLocation.getY() : Double.NaN);
+
+            if (!hasPosition) {
                 return;
             }
 
