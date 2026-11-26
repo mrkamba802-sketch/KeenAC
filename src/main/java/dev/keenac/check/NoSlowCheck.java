@@ -297,7 +297,8 @@ public final class NoSlowCheck implements Listener {
         UUID id = player.getUniqueId();
         int vl = violations.merge(id, 1, Integer::sum);
         lastViolationNanos.put(id, System.nanoTime());
-        plugin.getAlertManager().send("NoSlow", player, vl);
+        plugin.getAlertManager().send("NoSlow", player, vl,
+                "Movement or item-use timing did not match the expected slowdown while using an item.");
     }
 
     private void recordInterruptionViolation(Player player) {
