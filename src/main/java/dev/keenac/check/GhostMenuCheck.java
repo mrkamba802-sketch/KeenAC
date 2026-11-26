@@ -31,6 +31,7 @@ public final class GhostMenuCheck implements Listener {
     private static final long MAX_MOVEMENT_GAP_NANOS = 300_000_000L;
     private static final int MAX_QUEUED_SAMPLES = 256;
     private static final int TRIMMED_QUEUE_SIZE = 128;
+    private static final int CLOSE_AFTER_SUSPICIONS = 3;
 
     private final KeenAC plugin;
     private final Map<UUID, MenuState> states = new ConcurrentHashMap<>();
@@ -39,6 +40,7 @@ public final class GhostMenuCheck implements Listener {
     private final Map<UUID, Long> personalInventoryClicks = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastAlerts = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> externalMovementGraceUntil = new ConcurrentHashMap<>();
 
     public GhostMenuCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -60,6 +62,7 @@ public final class GhostMenuCheck implements Listener {
         MenuState state = states.computeIfAbsent(id, ignored -> new MenuState());
         state.begin(MenuSource.CONTAINER, System.nanoTime(), event.getView().getType().name(),
                 player.getLocation().getX(), player.getLocation().getZ(), openGraceNanos());
+        state.externalMovementGraceUntilNanos = externalMovementGraceUntil.getOrDefault(id, 0L);
         personalInventoryClicks.remove(id);
     }
 
@@ -152,10 +155,15 @@ public final class GhostMenuCheck implements Listener {
                 if (state.source != source) {
                     state.begin(source, sample.atNanos, menuType,
                             sample.x, sample.z, openGraceNanos());
+                    state.externalMovementGraceUntilNanos =
+                            externalMovementGraceUntil.getOrDefault(id, 0L);
                 }
 
+                long movementGraceUntil = Math.max(
+                        state.externalMovementGraceUntilNanos,
+                        externalMovementGraceUntil.getOrDefault(id, 0L));
                 if (sample.atNanos < state.graceUntilNanos
-                        || sample.atNanos < state.externalMovementGraceUntilNanos
+                        || sample.atNanos < movementGraceUntil
                         || player.getPing() > maxPing()
                         || isExempt(player)) {
                     state.resetMovementWindow();
@@ -206,8 +214,12 @@ public final class GhostMenuCheck implements Listener {
                 if (state.samples >= requiredSamples()
                         && sample.atNanos - state.sampleStartedNanos >= requiredDurationNanos()
                         && state.distance >= requiredDistance()) {
-                    reportViolation(player, sample.atNanos, state, speed);
+                    boolean menuClosed = reportViolation(player, sample.atNanos, state, speed);
                     state.resetMovementWindow();
+                    if (menuClosed) {
+                        queue.clear();
+                        break;
+                    }
                 }
             }
         }
@@ -216,14 +228,20 @@ public final class GhostMenuCheck implements Listener {
         states.keySet().removeIf(id -> plugin.getServer().getPlayer(id) == null);
         personalInventoryClicks.keySet().removeIf(
                 id -> plugin.getServer().getPlayer(id) == null);
+        externalMovementGraceUntil.keySet().removeIf(id -> {
+            Long graceUntil = externalMovementGraceUntil.get(id);
+            return plugin.getServer().getPlayer(id) == null
+                    || graceUntil == null || now > graceUntil;
+        });
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onVelocity(PlayerVelocityEvent event) {
         grantExternalMovementGrace(event.getPlayer());
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    // Includes melee and projectile hits, even when another plugin cancels damage.
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onDamage(EntityDamageEvent event) {
         if (event.getEntity() instanceof Player player) {
             grantExternalMovementGrace(player);
@@ -249,9 +267,13 @@ public final class GhostMenuCheck implements Listener {
     }
 
     private void grantExternalMovementGrace(Player player) {
-        MenuState state = states.get(player.getUniqueId());
+        UUID id = player.getUniqueId();
+        long graceUntil = System.nanoTime() + velocityGraceNanos();
+        externalMovementGraceUntil.merge(id, graceUntil, Math::max);
+        MenuState state = states.get(id);
         if (state != null) {
-            state.externalMovementGraceUntilNanos = System.nanoTime() + velocityGraceNanos();
+            state.externalMovementGraceUntilNanos = Math.max(
+                    state.externalMovementGraceUntilNanos, graceUntil);
             state.resetMovementWindow();
         }
     }
@@ -274,25 +296,37 @@ public final class GhostMenuCheck implements Listener {
                 || below == Material.SOUL_SAND || below == Material.SOUL_SOIL;
     }
 
-    private void reportViolation(Player player, long now, MenuState state, double speed) {
-        long previous = lastAlerts.getOrDefault(player.getUniqueId(), 0L);
-        if (now - previous < alertCooldownNanos()) {
-            return;
-        }
+    private boolean reportViolation(Player player, long now, MenuState state, double speed) {
+        UUID id = player.getUniqueId();
+        int level = violationLevels.merge(id, 1, Integer::sum);
+        state.suspicions++;
 
-        int level = violationLevels.merge(player.getUniqueId(), 1, Integer::sum);
-        lastAlerts.put(player.getUniqueId(), now);
-        plugin.getAlertManager().send("GhostMenu", player, level);
+        long previous = lastAlerts.getOrDefault(id, 0L);
+        if (now - previous >= alertCooldownNanos()) {
+            lastAlerts.put(id, now);
+            plugin.getAlertManager().send("GhostMenu", player, level);
+        }
         if (plugin.getConfig().getBoolean("checks.ghost-menu.log-context", true)) {
             plugin.getLogger().info(String.format(java.util.Locale.ROOT,
-                    "GhostMenu review for %s (VL=%d, menu=%s, speed=%.2f, distance=%.2f, samples=%d)",
-                    player.getName(), level, state.menuType, speed, state.distance, state.samples));
+                    "GhostMenu review for %s (VL=%d, suspicion=%d/%d, menu=%s, speed=%.2f, distance=%.2f, samples=%d)",
+                    player.getName(), level, state.suspicions, CLOSE_AFTER_SUSPICIONS,
+                    state.menuType, speed, state.distance, state.samples));
         }
+
+        if (state.suspicions >= CLOSE_AFTER_SUSPICIONS) {
+            plugin.getLogger().info("GhostMenu closed for " + player.getName()
+                    + " after " + CLOSE_AFTER_SUSPICIONS + " confirmed suspicions.");
+            player.closeInventory();
+            clearTracking(id);
+            return true;
+        }
+        return false;
     }
 
     private void clearTracking(UUID id) {
         states.remove(id);
         personalInventoryClicks.remove(id);
+        externalMovementGraceUntil.remove(id);
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.remove(id);
         if (queue != null) {
             queue.clear();
@@ -302,6 +336,7 @@ public final class GhostMenuCheck implements Listener {
     private void clearTrackingOnly() {
         states.clear();
         personalInventoryClicks.clear();
+        externalMovementGraceUntil.clear();
         packetPositions.values().forEach(ConcurrentLinkedQueue::clear);
     }
 
@@ -384,12 +419,15 @@ public final class GhostMenuCheck implements Listener {
         private double lastPacketZ;
         private int samples;
         private double distance;
+        private int suspicions;
 
         private void begin(MenuSource source, long now, String menuType,
                            double x, double z, long graceNanos) {
             this.source = source;
             this.menuType = menuType;
             this.graceUntilNanos = now + graceNanos;
+            this.externalMovementGraceUntilNanos = 0L;
+            this.suspicions = 0;
             this.lastPacketX = x;
             this.lastPacketZ = z;
             this.lastPacketNanos = now;
