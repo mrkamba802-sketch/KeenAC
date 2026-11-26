@@ -189,7 +189,8 @@ public final class NoFallCheck implements Listener {
                 state.claims++;
             }
 
-            if (state.claims >= requiredPackets
+            int neededClaims = profile.physicallySupported ? 1 : requiredPackets;
+            if (state.claims >= neededClaims
                     && state.candidateFallDistance > minimumFallDistance
                     && now - state.lastAlertNanos >= alertCooldownNanos) {
                 state.lastAlertNanos = now;
