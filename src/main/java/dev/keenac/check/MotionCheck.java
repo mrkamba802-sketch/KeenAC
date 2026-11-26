@@ -8,6 +8,7 @@ import org.bukkit.Material;
 import org.bukkit.GameMode;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -66,9 +67,11 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, Integer> hoveringTicks = new HashMap<>();
     private final Map<UUID, MotionPacketProfile> motionPacketProfiles = new ConcurrentHashMap<>();
     private final Map<UUID, MotionPacketState> motionPacketStates = new ConcurrentHashMap<>();
-    private volatile double motionSpeedMultiplier = 1.30;
-    private volatile double motionSpeedBufferBps = 0.55;
+    private volatile double motionSpeedMultiplier = 1.06;
+    private volatile double motionSpeedBufferBps = 0.12;
     private volatile int motionSpeedConfirmSamples = 3;
+    private volatile long motionSpeedWindowNanos = 500_000_000L;
+    private volatile long motionSpeedMinimumWindowNanos = 350_000_000L;
     private volatile int motionPacketMaxPing = 250;
     private volatile long motionPacketCooldownNanos = 400_000_000L;
     private volatile long motionHoverConfirmNanos = 600_000_000L;
@@ -382,12 +385,17 @@ public final class MotionCheck implements Listener {
      * consume this immutable profile and never query Bukkit world/player state.
      */
     private void refreshMotionPacketSettings() {
-        motionSpeedMultiplier = Math.max(1.05,
-                Math.min(3.0, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.30)));
+        motionSpeedMultiplier = Math.max(1.0,
+                Math.min(2.0, plugin.getConfig().getDouble("checks.motion.speed.multiplier", 1.06)));
         motionSpeedBufferBps = Math.max(0.0,
-                plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.55));
-        motionSpeedConfirmSamples = Math.max(1,
+                plugin.getConfig().getDouble("checks.motion.speed.buffer-bps", 0.12));
+        motionSpeedConfirmSamples = Math.max(2,
                 plugin.getConfig().getInt("checks.motion.speed.confirm-samples", 3));
+        int sampleWindowMs = Math.max(350,
+                Math.min(1_000, plugin.getConfig().getInt("checks.motion.speed.sample-window-ms", 500)));
+        motionSpeedWindowNanos = sampleWindowMs * 1_000_000L;
+        motionSpeedMinimumWindowNanos = Math.max(250_000_000L,
+                motionSpeedWindowNanos * 2L / 3L);
         motionPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
         motionPacketCooldownNanos = Math.max(200L,
@@ -407,8 +415,9 @@ public final class MotionCheck implements Listener {
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
         boolean recentVelocity = velocityAt > 0L && now - velocityAt <= velocityGrace;
 
-        boolean specialSurface = isSpecialMovementSurface(location)
-                || isSpecialMovementSurface(location.clone().subtract(0.0, 0.7, 0.0));
+        boolean unsupportedSurface = isUnsupportedMovementSurface(location)
+                || isUnsupportedMovementSurface(location.clone().subtract(0.0, 0.7, 0.0));
+        double surfaceMultiplier = getSurfaceMovementMultiplier(player, location);
         boolean movementModeEligible = player.isOnline() && player.isValid()
                 && !player.isInsideVehicle() && !player.isFlying() && !player.isGliding()
                 && !player.isSwimming() && !player.isRiptiding()
@@ -418,20 +427,29 @@ public final class MotionCheck implements Listener {
                 && player.getOpenInventory().getType() == InventoryType.CRAFTING
                 && !player.hasPotionEffect(PotionEffectType.LEVITATION)
                 && !player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
-                && !specialSurface && !recentVelocity;
+                && !unsupportedSurface && !recentVelocity;
 
         AttributeInstance movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
         double base = movementAttribute == null ? 0.1 : Math.max(0.001, movementAttribute.getBaseValue());
         double value = movementAttribute == null ? base : movementAttribute.getValue();
         double attributeMultiplier = Math.max(0.5, Math.min(8.0, value / base));
         PotionEffect speedEffect = player.getPotionEffect(PotionEffectType.SPEED);
-        double potionMultiplier = speedEffect == null ? 1.0 : 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
+        double potionMultiplier = speedEffect == null ? 1.0
+                : 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
+        PotionEffect slownessEffect = player.getPotionEffect(PotionEffectType.SLOWNESS);
+        if (slownessEffect != null) {
+            potionMultiplier *= Math.max(0.05,
+                    1.0 - 0.15 * (slownessEffect.getAmplifier() + 1));
+        }
         double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
-        // Attribute modifiers may already include sprint and potion modifiers.
-        // Use the larger estimate rather than multiplying them twice.
+        // The attribute value normally contains potion/sprint modifiers already.
+        // The explicit estimate is a fallback for server implementations that do not.
         double movementMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
         double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
-        double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier;
+        double stanceMultiplier = player.isSneaking() ? 0.30 : 1.0;
+        double airborneMultiplier = player.isOnGround() ? 1.0 : 1.08;
+        double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier
+                * stanceMultiplier * surfaceMultiplier * airborneMultiplier;
 
         boolean hoverEligible = movementModeEligible && !player.isOnGround()
                 && !player.hasPotionEffect(PotionEffectType.JUMP_BOOST);
@@ -471,7 +489,7 @@ public final class MotionCheck implements Listener {
             state.positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
             state.lastPacketNanos = nowNanos;
 
-            long cutoff = nowNanos - 400_000_000L;
+            long cutoff = nowNanos - motionSpeedWindowNanos;
             while (state.positions.size() > 2) {
                 java.util.Iterator<MotionPositionSample> iterator = state.positions.iterator();
                 iterator.next();
@@ -486,7 +504,7 @@ public final class MotionCheck implements Listener {
             MotionPositionSample first = state.positions.peekFirst();
             MotionPositionSample last = state.positions.peekLast();
             long windowNanos = last.timestampNanos - first.timestampNanos;
-            if (windowNanos >= 250_000_000L) {
+            if (windowNanos >= motionSpeedMinimumWindowNanos) {
                 double dx = last.x - first.x;
                 double dz = last.z - first.z;
                 double horizontalBps = Math.sqrt(dx * dx + dz * dz)
@@ -585,27 +603,42 @@ public final class MotionCheck implements Listener {
                 && System.currentTimeMillis() - glideChangedAt <= glideGrace;
     }
 
-    private boolean isSpecialMovementSurface(Location location) {
+    private boolean isUnsupportedMovementSurface(Location location) {
         Material feet = location.getBlock().getType();
         Material below = location.clone().subtract(0.0, 0.2, 0.0).getBlock().getType();
-        return isSpecialMovementMaterial(feet) || isSpecialMovementMaterial(below);
+        return isUnsupportedMovementMaterial(feet) || isUnsupportedMovementMaterial(below);
     }
 
-    private boolean isSpecialMovementMaterial(Material material) {
+    private boolean isUnsupportedMovementMaterial(Material material) {
         String name = material.name();
+        // These modes have dedicated vertical/fluid/climbing physics; they are
+        // deliberately excluded instead of being judged by the ground-speed model.
         return material == Material.WATER || material == Material.LAVA
-                || name.contains("ICE")
-                || name.contains("SLIME")
-                || name.contains("HONEY")
-                || name.contains("COBWEB")
-                || name.contains("WEB")
-                || name.contains("POWDER_SNOW")
-                || name.contains("SOUL_SAND")
-                || name.contains("SOUL_SOIL")
-                || name.contains("SCAFFOLDING")
-                || name.contains("LADDER")
-                || name.contains("VINE")
-                || name.contains("BUBBLE_COLUMN");
+                || material == Material.COBWEB || material == Material.POWDER_SNOW
+                || material == Material.SCAFFOLDING || material == Material.BUBBLE_COLUMN
+                || name.contains("LADDER") || name.contains("VINE");
+    }
+
+    private double getSurfaceMovementMultiplier(Player player, Location location) {
+        Material surface = location.clone().subtract(0.0, 0.2, 0.0).getBlock().getType();
+        String name = surface.name();
+        if (name.contains("ICE")) {
+            // Ice keeps momentum longer; allow a modest transition/inertia margin.
+            return 1.12;
+        }
+        if (name.contains("SLIME")) {
+            // Slime contact can produce short legitimate horizontal impulses.
+            return 1.10;
+        }
+        if (name.contains("HONEY")) {
+            return 0.70;
+        }
+        if (surface == Material.SOUL_SAND || surface == Material.SOUL_SOIL) {
+            var boots = player.getInventory().getBoots();
+            int soulSpeed = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SOUL_SPEED);
+            return Math.min(1.0, 0.55 + 0.15 * soulSpeed);
+        }
+        return 1.0;
     }
 
     private void inspectHover(Player player, Location previous, Location current) {
