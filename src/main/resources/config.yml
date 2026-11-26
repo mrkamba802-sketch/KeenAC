@@ -34,6 +34,13 @@ checks:
     # Cancel attacks when the target cannot be seen through blocks.
     cancel-hits: true
 
+  wall-interact:
+    enabled: true
+    # Cancel block and entity interactions when a solid block blocks Line of Sight.
+    cancel-actions: true
+    # Ray-trace range used when checking whether an interacted block is occluded.
+    max-distance: 7.0
+
   no-slow:
     enabled: true
     # Consecutive suspicious movement samples required before an alert.
@@ -70,8 +77,7 @@ checks:
     sample-window-ms: 1200
     max-ping-ms: 250
     # Movement is only reviewed while the server-side GUI is actually open.
-    # Decay one VL after this much time without another confirmed violation.
-    violation-decay-ms: 5000
+    # Violation levels continue across GUI sessions and reset on quit/world change.
     # Return to the last safe position at x3, following the NoWeb correction model.
     setback:
       enabled: true
@@ -229,7 +235,8 @@ alerts:
   # Send alerts to console as well as opted-in staff.
   console: true
   # Supports legacy & color codes and placeholders:
-  # {prefix}, {player}, {check}, {vl}
+  # {prefix}, {player}, {check}, {vl}, {reason}, {ping}, {tps}
+  # Hover over the check name in-game to view player, reason, ping, TPS and VL.
   format: "{prefix} &f{player} &7failed &c{check} &8(x{vl})"
   prefix: "&bKeenAC &8»"
 
