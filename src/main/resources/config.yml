@@ -71,6 +71,11 @@ checks:
     max-ping-ms: 250
     # Watch movement briefly after x3 closes the GUI; continued movement becomes x4.
     post-close-watch-ms: 1500
+    # Decay one VL after this much time without another confirmed violation.
+    violation-decay-ms: 5000
+    # Return to the last safe position at x3, following the NoWeb correction model.
+    setback:
+      enabled: true
     # Escalation freeze after x4 and subsequent movement attempts.
     freeze-duration-ms: 2500
     log-context: true
