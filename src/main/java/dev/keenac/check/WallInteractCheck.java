@@ -42,8 +42,14 @@ public final class WallInteractCheck implements Listener {
             return;
         }
 
+        // Soft mode: avoid checking close-range clicks and only cancel when
+        // the player is clearly aiming toward a target beyond a solid occluder.
+        if (player.getEyeLocation().distance(clicked.getLocation().add(0.5, 0.5, 0.5))
+                < minCheckDistance()) {
+            return;
+        }
         Block obstacle = findOccluder(player, clicked);
-        if (obstacle != null) {
+        if (obstacle != null && isSolidOccluder(obstacle)) {
             event.setCancelled(true);
             report(player, "Attempted to interact with " + clicked.getType()
                     + " while Line of Sight was blocked by " + obstacle.getType() + ".");
@@ -88,6 +94,16 @@ public final class WallInteractCheck implements Listener {
     private double maxDistance() {
         return Math.max(4.0,
                 plugin.getConfig().getDouble("checks.wall-interact.max-distance", 7.0));
+    }
+
+    private double minCheckDistance() {
+        return Math.max(2.5,
+                plugin.getConfig().getDouble("checks.wall-interact.min-check-distance", 4.5));
+    }
+
+    private boolean isSolidOccluder(Block block) {
+        // Ignore partial shapes and blocks with non-solid collision behaviour.
+        return block.getType().isSolid() && block.getCollisionShape().getBoundingBoxes().size() == 1;
     }
 
     private Block findOccluder(Player player, Block target) {
