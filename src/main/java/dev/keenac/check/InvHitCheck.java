@@ -29,7 +29,6 @@ public final class InvHitCheck implements Listener {
     private final Set<UUID> openContainerViews = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> recentPersonalInventoryActivity = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastAlertNanos = new ConcurrentHashMap<>();
 
     public InvHitCheck(KeenAC plugin) {
         this.plugin = plugin;
@@ -100,16 +99,7 @@ public final class InvHitCheck implements Listener {
         }
 
         UUID id = player.getUniqueId();
-        long now = System.nanoTime();
-        long cooldownNanos = Math.max(0L,
-                plugin.getConfig().getLong("alerts.delay-seconds", 3L)) * 1_000_000_000L;
-        long previous = lastAlertNanos.getOrDefault(id, 0L);
-        if (now - previous < cooldownNanos) {
-            return;
-        }
-
         int violationLevel = violationLevels.merge(id, 1, Integer::sum);
-        lastAlertNanos.put(id, now);
         plugin.getAlertManager().send("InvHit", player, violationLevel,
                 "An attack was attempted while a server-side inventory or container screen was open.");
     }
@@ -123,13 +113,11 @@ public final class InvHitCheck implements Listener {
         openContainerViews.remove(id);
         recentPersonalInventoryActivity.remove(id);
         violationLevels.remove(id);
-        lastAlertNanos.remove(id);
     }
 
     public void clearAll() {
         openContainerViews.clear();
         recentPersonalInventoryActivity.clear();
         violationLevels.clear();
-        lastAlertNanos.clear();
     }
 }
