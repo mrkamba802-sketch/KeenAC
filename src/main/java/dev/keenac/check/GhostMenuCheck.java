@@ -31,9 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Reviews sustained suspicious movement while a server-side GUI is open.
- * The post-close watch uses the same movement thresholds to avoid flagging
- * ordinary movement immediately after the inventory is closed.
+ * Reviews sustained suspicious movement only during an active server-side GUI.
+ * Packet collection is explicitly stopped as soon as the GUI closes.
  */
 public final class GhostMenuCheck implements Listener {
     private static final long MAX_MOVEMENT_GAP_NANOS = 300_000_000L;
@@ -44,6 +43,7 @@ public final class GhostMenuCheck implements Listener {
     private static final long FREEZE_ATTEMPT_ALERT_INTERVAL_MS = 150L;
 
     private final KeenAC plugin;
+    private final java.util.Set<UUID> activeMenus = ConcurrentHashMap.newKeySet();
     private final Map<UUID, MenuState> states = new ConcurrentHashMap<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
@@ -77,6 +77,7 @@ public final class GhostMenuCheck implements Listener {
         }
 
         UUID id = player.getUniqueId();
+        activeMenus.add(id);
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
         if (queue != null) {
             queue.clear();
@@ -94,13 +95,12 @@ public final class GhostMenuCheck implements Listener {
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getView().getType() != InventoryType.CRAFTING) {
             UUID id = event.getPlayer().getUniqueId();
-            MenuState state = states.remove(id);
-            // A check-forced close keeps its escalation briefly, but movement
-            // after the GUI is closed is never reviewed as GhostMenu evidence.
-            if (state == null || !state.closedByCheck) {
-                violationLevels.remove(id);
-                lastViolationAt.remove(id);
-            }
+            activeMenus.remove(id);
+            states.remove(id);
+            // Each GUI session starts with a clean VL; nothing after close
+            // can inherit or extend a previous GhostMenu violation.
+            violationLevels.remove(id);
+            lastViolationAt.remove(id);
             ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
             if (queue != null) {
                 queue.clear();
@@ -110,8 +110,8 @@ public final class GhostMenuCheck implements Listener {
 
     /** PacketEvents entry point: primitive values only; no Bukkit API calls. */
     public void recordPacketPosition(UUID playerId, double x, double y, double z) {
-        if (playerId == null || !Double.isFinite(x) || !Double.isFinite(y)
-                || !Double.isFinite(z)) {
+        if (playerId == null || !activeMenus.contains(playerId)
+                || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
             return;
         }
         ConcurrentLinkedQueue<PacketPosition> queue =
@@ -164,7 +164,10 @@ public final class GhostMenuCheck implements Listener {
 
             boolean containerOpen = player.getOpenInventory().getType() != InventoryType.CRAFTING;
             if (!containerOpen) {
+                activeMenus.remove(id);
                 states.remove(id);
+                violationLevels.remove(id);
+                lastViolationAt.remove(id);
                 ConcurrentLinkedQueue<PacketPosition> stale = packetPositions.get(id);
                 if (stale != null) {
                     stale.clear();
@@ -172,6 +175,7 @@ public final class GhostMenuCheck implements Listener {
                 continue;
             }
 
+            activeMenus.add(id);
             ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.get(id);
             if (queue == null) {
                 continue;
@@ -481,15 +485,13 @@ public final class GhostMenuCheck implements Listener {
         }
 
         if (level >= 3) {
-            state.closedByCheck = true;
             player.closeInventory();
             if (plugin.getConfig().getBoolean("checks.ghost-menu.setback.enabled", true)) {
                 applySetback(player, state);
             }
         }
-        if (level >= 4) {
-            freezePlayer(player, state);
-        }
+        // GhostMenu uses a NoWeb-style setback only. Do not freeze the player:
+        // movement after the GUI has closed must remain ordinary movement.
         return level >= 3;
     }
 
@@ -652,6 +654,7 @@ public final class GhostMenuCheck implements Listener {
     }
 
     private void clearTracking(UUID id) {
+        activeMenus.remove(id);
         states.remove(id);
         externalMovementGraceUntil.remove(id);
         ConcurrentLinkedQueue<PacketPosition> queue = packetPositions.remove(id);
@@ -661,6 +664,7 @@ public final class GhostMenuCheck implements Listener {
     }
 
     private void clearTrackingOnly() {
+        activeMenus.clear();
         states.clear();
         externalMovementGraceUntil.clear();
         violationLevels.clear();
@@ -747,7 +751,6 @@ public final class GhostMenuCheck implements Listener {
         private double lastPacketZ;
         private double verticalMinY;
         private double verticalMaxY;
-        private boolean closedByCheck;
         private Location safePosition;
         private int samples;
         private double distance;
@@ -758,7 +761,6 @@ public final class GhostMenuCheck implements Listener {
             this.menuType = menuType;
             this.graceUntilNanos = now + graceNanos;
             this.externalMovementGraceUntilNanos = 0L;
-            this.closedByCheck = false;
             this.lastPacketX = x;
             this.lastPacketY = y;
             this.lastPacketZ = z;
