@@ -168,12 +168,11 @@ public final class NoWebCheck implements Listener {
                 && now - state.lastMovementNanos > 300_000_000L) {
             state.lastMovementNanos = now;
             state.lastSafe = to.clone();
-            state.webEnteredAtNanos = now;
             return;
         }
 
         double elapsedTicks = getElapsedTicks(state, now);
-        double maxHorizontalDistance = getAllowedMoveDistance(player, to, elapsedTicks);
+        double maxHorizontalDistance = getAllowedMoveDistance(player, elapsedTicks);
         // NoWeb evaluates horizontal displacement only. Vertical movement inside
         // cobweb depends on entry momentum, gravity and potion physics; a fixed
         // vertical cap is too crude and creates false positives for legitimate falls.
@@ -395,7 +394,7 @@ public final class NoWebCheck implements Listener {
      * allowance by the observed interval instead of using one fixed packet
      * distance for every player and every connection.
      */
-    private double getAllowedMoveDistance(Player player, Location movementLocation, double elapsedTicks) {
+    private double getAllowedMoveDistance(Player player, double elapsedTicks) {
         // The configured value is a per-50-ms baseline, not a per-packet
         // allowance. This keeps the limit consistent across packet batching.
         // 25% of the normal 4.317 blocks/sec walking speed is about 0.054
@@ -431,10 +430,6 @@ public final class NoWebCheck implements Listener {
         int swiftSneak = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SWIFT_SNEAK);
         double stanceMultiplier = player.isSneaking()
                 ? Math.min(0.75, 0.30 + 0.15 * swiftSneak) : 1.0;
-        if (player.isBlocking()) {
-            stanceMultiplier *= 0.20;
-        }
-
         // In vanilla, a cobweb permits roughly 25% of normal movement speed;
         // the Weaving effect raises this to about 50%. Read the effect by key
         // so the check remains compatible with API versions around its addition.
@@ -446,15 +441,11 @@ public final class NoWebCheck implements Listener {
             }
         }
 
-        // Cobweb slowdown already dominates while the hitbox is in the web.
-        // Floor friction is not a reliable second slowdown signal here.
-        double floorMultiplier = 1.0;
-
         // Scale the tolerance with stance too; otherwise blocking/sneaking
         // would inherit the full standing-player packet buffer.
         double stanceBufferMultiplier = Math.max(0.20, stanceMultiplier);
         return ((configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
-                * webMultiplier * floorMultiplier * strictMultiplier)
+                * webMultiplier * strictMultiplier)
                 + bufferPerTick * stanceBufferMultiplier) * elapsedTicks;
     }
 
