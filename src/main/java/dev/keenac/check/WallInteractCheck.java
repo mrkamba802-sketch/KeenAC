@@ -10,6 +10,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -32,8 +34,7 @@ public final class WallInteractCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockInteract(PlayerInteractEvent event) {
         if (!enabled() || !cancelActions()
-                || (event.getAction() != Action.RIGHT_CLICK_BLOCK
-                && event.getAction() != Action.LEFT_CLICK_BLOCK)) {
+                || event.getAction() != Action.RIGHT_CLICK_BLOCK) {
             return;
         }
 
@@ -43,22 +44,37 @@ public final class WallInteractCheck implements Listener {
             return;
         }
 
-        Location eye = player.getEyeLocation();
-        double distance = Math.min(maxDistance(),
-                Math.max(1.0, eye.distance(clicked.getLocation().add(0.5, 0.5, 0.5)) + 0.75));
-        var trace = player.getWorld().rayTraceBlocks(eye, eye.getDirection(), distance,
-                FluidCollisionMode.NEVER, true);
-
-        // A null trace is not enough evidence to cancel an interaction.
-        if (trace == null || trace.getHitBlock() == null
-                || trace.getHitBlock().equals(clicked)) {
-            return;
+        Block obstacle = findOccluder(player, clicked);
+        if (obstacle != null) {
+            event.setCancelled(true);
+            report(player, "Attempted to interact with " + clicked.getType()
+                    + " while Line of Sight was blocked by " + obstacle.getType() + ".");
         }
+    }
 
-        Block obstacle = trace.getHitBlock();
-        event.setCancelled(true);
-        report(player, "Attempted to interact with " + clicked.getType()
-                + " while Line of Sight was blocked by " + obstacle.getType() + ".");
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        if (!enabled() || !cancelActions()) return;
+        Player player = event.getPlayer();
+        Block obstacle = findOccluder(player, event.getBlock());
+        if (obstacle != null) {
+            event.setCancelled(true);
+            report(player, "Attempted to break " + event.getBlock().getType()
+                    + " through " + obstacle.getType() + ".");
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (!enabled() || !cancelActions()) return;
+        Player player = event.getPlayer();
+        Block against = event.getBlockAgainst();
+        Block obstacle = against == null ? null : findOccluder(player, against);
+        if (obstacle != null) {
+            event.setCancelled(true);
+            report(player, "Attempted to place " + event.getBlockPlaced().getType()
+                    + " through " + obstacle.getType() + ".");
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -99,6 +115,19 @@ public final class WallInteractCheck implements Listener {
     private double maxDistance() {
         return Math.max(4.0,
                 plugin.getConfig().getDouble("checks.wall-interact.max-distance", 7.0));
+    }
+
+    private Block findOccluder(Player player, Block target) {
+        Location eye = player.getEyeLocation();
+        double distance = Math.min(maxDistance(),
+                Math.max(1.0, eye.distance(target.getLocation().add(0.5, 0.5, 0.5)) + 0.75));
+        var trace = player.getWorld().rayTraceBlocks(eye, eye.getDirection(), distance,
+                FluidCollisionMode.NEVER, true);
+        if (trace == null || trace.getHitBlock() == null
+                || trace.getHitBlock().equals(target)) {
+            return null;
+        }
+        return trace.getHitBlock();
     }
 
     private void report(Player player, String reason) {
