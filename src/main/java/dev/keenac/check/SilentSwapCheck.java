@@ -204,7 +204,8 @@ public final class SilentSwapCheck implements Listener {
     private void dispatchReview(UUID playerId, PlayerState state) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player player = Bukkit.getPlayer(playerId);
-            if (player == null || !player.isOnline() || !enabled || !isEligible(player)) {
+            if (player == null || !player.isOnline() || !enabled || !isEligible(player)
+                    || states.get(playerId) != state) {
                 synchronized (state) {
                     state.alertPending = false;
                 }
@@ -213,7 +214,9 @@ public final class SilentSwapCheck implements Listener {
 
             int violationLevel;
             synchronized (state) {
-                if (!enabled) {
+                // Inventory/lifecycle events may invalidate a queued packet
+                // candidate before this main-thread review is executed.
+                if (!enabled || !state.alertPending) {
                     state.alertPending = false;
                     return;
                 }
