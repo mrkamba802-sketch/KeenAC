@@ -112,12 +112,9 @@ checks:
 
   no-fall:
     enabled: true
-    # Flag suppressed damage from falls of four blocks or more; require server-measured descent.
+    # Alert only after a supported landing with expected fall damage and no
+    # vanilla FALL damage event. Airborne onGround claims are diagnostic only.
     minimum-fall-distance: 4.0
-    # Repeated onGround claims while server collision says airborne trigger immediate escalating VL.
-    required-packets: 2
-    packet-window-ms: 750
-    max-ping-ms: 250
     alert-cooldown-ms: 2000
     # On a confirmed NoFall violation, return to the latest safe ground position.
     setback:
