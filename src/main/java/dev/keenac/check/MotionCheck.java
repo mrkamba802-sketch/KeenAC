@@ -722,7 +722,8 @@ public final class MotionCheck implements Listener {
         samples.clear();
         reviewUntil.put(id, now + reviewWindow);
 
-        plugin.getAlertManager().send("Motion", player, violationLevel);
+        plugin.getAlertManager().send("Motion", player, violationLevel,
+                "Movement anomaly: " + sanitizeReason(reason));
         if (plugin.getConfig().getBoolean("checks.motion.log-context", true)) {
             plugin.getLogger().info("Motion review for " + player.getName()
                     + " (VL=" + violationLevel + ", reason="
