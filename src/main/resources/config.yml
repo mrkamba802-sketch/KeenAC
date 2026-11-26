@@ -74,6 +74,23 @@ checks:
     window-ms: 1500
     alert-cooldown-ms: 5000
 
+  silent-swap:
+    enabled: true
+    # Require repeated switch -> main-hand action -> switch-back cycles.
+    # A single hotbar change or a lone action never raises VL.
+    required-cycles: 4
+    # Maximum duration of each complete temporary-slot cycle.
+    max-cycle-ms: 120
+    # Ignore impossible/duplicate near-zero packet pairs.
+    min-cycle-ms: 4
+    # All confirmed cycles must fit inside this rolling observation window.
+    observation-window-ms: 2500
+    # Skip reviews when latency makes packet timing unreliable.
+    max-ping-ms: 180
+    alert-cooldown-ms: 5000
+    # Advisory only: this check never cancels attacks or item interactions.
+    log-context: true
+
   motion:
     enabled: true
     # Five independently sampled anomalies inside this rolling window trigger an alert.
@@ -108,25 +125,6 @@ checks:
       confirm-samples: 3
     packet-alert-cooldown-ms: 400
     # Log potion effects, effective movement attribute, velocity and movement states to console.
-    log-context: true
-
-  no-fall:
-    enabled: true
-    # Detect four-block falls; client ground claims are only suspicious when
-    # repeated during a server-confirmed airborne descent.
-    minimum-fall-distance: 4.0
-    required-ground-packets: 3
-    packet-window-ms: 1000
-    max-ping-ms: 250
-    alert-cooldown-ms: 2000
-    # On a confirmed NoFall violation, return to the latest safe ground position.
-    setback:
-      enabled: true
-      safe-position-max-age-ms: 30000
-    # Apply fall damage after rollback if the player suppressed a damaging fall.
-    # Base amount follows ceil(fallDistance - 3).
-    damage:
-      enabled: true
     log-context: true
 
   elytra-speed:
