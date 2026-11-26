@@ -52,7 +52,6 @@ public final class BaritoneCheck implements Listener {
     private volatile double minimumSegmentDistance = 1.0;
     private volatile double maximumSegmentDistance = 12.0;
     private volatile double yawTurnToleranceDegrees = 28.0;
-    private volatile long alertCooldownNanos = 15_000_000_000L;
     private volatile boolean logContext = true;
 
     public BaritoneCheck(KeenAC plugin) {
@@ -119,9 +118,6 @@ public final class BaritoneCheck implements Listener {
         yawTurnToleranceDegrees = Math.max(10.0,
                 Math.min(60.0, plugin.getConfig().getDouble(
                         "checks.baritone.yaw-turn-tolerance-degrees", 28.0)));
-        alertCooldownNanos = Math.max(2_000L,
-                plugin.getConfig().getLong("checks.baritone.alert-cooldown-ms", 15000L))
-                * 1_000_000L;
         logContext = plugin.getConfig().getBoolean("checks.baritone.log-context", true);
     }
 
@@ -230,10 +226,7 @@ public final class BaritoneCheck implements Listener {
                 if (validTurn && yawMatches) {
                     state.turns.addLast(new TurnSample(turn, segmentLength, now));
                     pruneOldTurns(state, now);
-                    if (hasRepeatedPattern(state)
-                            && (state.lastAlertNanos == 0L
-                            || now - state.lastAlertNanos >= alertCooldownNanos)) {
-                        state.lastAlertNanos = now;
+                    if (hasRepeatedPattern(state)) {
                         if (state.violationLevel < Integer.MAX_VALUE) {
                             state.violationLevel++;
                         }
@@ -397,7 +390,6 @@ public final class BaritoneCheck implements Listener {
         private double accumulatedYawChange;
         private double segmentDistance;
         private long lastPacketNanos;
-        private long lastAlertNanos;
         private int violationLevel;
         private boolean hasYaw;
         private boolean hasDirection;
