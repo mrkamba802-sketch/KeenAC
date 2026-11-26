@@ -60,7 +60,8 @@ checks:
     max-ping-ms: 250
     # The E-inventory is client-side; detection is best-effort after window-0 clicks.
     personal-inventory-window-ms: 2200
-    alert-cooldown-ms: 5000
+    # Escalation freeze after the fourth confirmed GhostHand suspicion.
+    freeze-duration-ms: 2500
     log-context: true
 
   auto-swap:
