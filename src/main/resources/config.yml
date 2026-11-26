@@ -45,7 +45,7 @@ checks:
 
   ghost-menu:
     enabled: true
-    # Ignore momentum immediately after opening a container or clicking the E-inventory.
+    # Ignore momentum immediately after opening a server-side container.
     open-grace-ms: 1200
     # Recheck movement after velocity changes or damage to avoid knockback false positives.
     velocity-grace-ms: 1000
