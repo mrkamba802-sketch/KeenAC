@@ -69,8 +69,7 @@ checks:
     required-distance: 0.65
     sample-window-ms: 1200
     max-ping-ms: 250
-    # Watch movement briefly after x3 closes the GUI; continued movement becomes x4.
-    post-close-watch-ms: 1500
+    # Movement is only reviewed while the server-side GUI is actually open.
     # Decay one VL after this much time without another confirmed violation.
     violation-decay-ms: 5000
     # Return to the last safe position at x3, following the NoWeb correction model.
