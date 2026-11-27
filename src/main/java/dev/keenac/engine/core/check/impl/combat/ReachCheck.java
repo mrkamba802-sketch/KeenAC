@@ -267,6 +267,10 @@ public class ReachCheck extends Check implements PacketCheck {
                     type == EntityTypes.PLAYER ? PLAYER_HEIGHT : ENTITY_DEFAULT_SIZE);
         }
         TrackedEntity(EntityType type, double x, double y, double z, long timestamp,
+                      double halfWidth, double height) {
+            this(type, x, y, z, timestamp, halfWidth, halfWidth, height);
+        }
+        TrackedEntity(EntityType type, double x, double y, double z, long timestamp,
                       double halfWidthX, double halfWidthZ, double height) {
             this.type = type;
             this.halfWidthX = halfWidthX;
