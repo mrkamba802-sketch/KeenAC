@@ -27,6 +27,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -48,10 +49,13 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
 
     private final KeenAC plugin;
     private final Map<UUID, MovementState> states = new ConcurrentHashMap<>();
+    private final BukkitTask elytraMonitorTask;
 
     public WindfallMovementCheckSuite(KeenAC plugin) {
         super(PacketListenerPriority.NORMAL);
         this.plugin = plugin;
+        this.elytraMonitorTask = Bukkit.getScheduler().runTaskTimer(
+                plugin, this::monitorElytraTick, 1L, 1L);
     }
 
     @Override
@@ -536,7 +540,6 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         double dy = to.getY() - from.getY();
         double dz = to.getZ() - from.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
-        reviewElytra(player, state, dy, horizontal, now);
 
         if (enabled("omni-sprint") && player.isSprinting()
                 && !player.isInsideVehicle() && !player.isFlying()
@@ -596,56 +599,62 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         state.lastMoveNanos = now;
     }
 
-    private void reviewElytra(Player player, MovementState state,
-                              double deltaY, double horizontalDelta, long now) {
+    private void monitorElytraTick() {
         if (!enabled("elytra")) return;
-        if (!player.isGliding()) {
-            state.elytraTicks = 0;
-            state.elytraLastSampleNanos = 0L;
-            state.elytraHoverTicks = 0;
-            state.elytraAscentSamples = 0;
-            return;
-        }
-
-        if (state.elytraLastSampleNanos != 0L
-                && now - state.elytraLastSampleNanos < 40_000_000L) return;
-        state.elytraLastSampleNanos = now;
-        state.elytraTicks++;
-        if (Math.abs(deltaY) <= 0.005) {
-            state.elytraHoverTicks++;
-            if (state.elytraHoverTicks >= 40) {
-                flag(player, "Elytra", "Sustained near-zero vertical movement was observed while gliding.");
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            MovementState state = state(player);
+            if (!player.isGliding()) {
+                state.elytraTicks = 0;
                 state.elytraHoverTicks = 0;
-            }
-        } else {
-            state.elytraHoverTicks = Math.max(0, state.elytraHoverTicks - 2);
-        }
-
-        boolean recentFirework = state.lastFireworkNanos != 0L
-                && now - state.lastFireworkNanos < 2_500_000_000L;
-        if (state.elytraTicks <= 3 && deltaY > 0.50 && !recentFirework) {
-            state.elytraKickBoostSamples++;
-            if (state.elytraKickBoostSamples >= 2) {
-                flag(player, "Elytra", "An unusually strong upward impulse was observed immediately after gliding began without a recent firework boost.");
-                state.elytraKickBoostSamples = 0;
-            }
-        } else {
-            state.elytraKickBoostSamples = Math.max(0, state.elytraKickBoostSamples - 1);
-        }
-
-        if (state.elytraTicks > 5 && deltaY > 0.12 && !recentFirework
-                && horizontalDelta > 0.10) {
-            state.elytraAscentSamples++;
-            if (state.elytraAscentSamples >= 4) {
-                flag(player, "Elytra", "Repeated sustained ascent while gliding had no recent firework boost.");
                 state.elytraAscentSamples = 0;
+                state.elytraKickBoostSamples = 0;
+                state.lastElytraTickY = Double.NaN;
+                continue;
             }
-        } else {
-            state.elytraAscentSamples = Math.max(0, state.elytraAscentSamples - 1);
-        }
 
-        // MotionCheck already owns horizontal ElytraSpeed measurement; this class
-        // only adds the hover/ascent signals to avoid duplicate speed flags.
+            double currentY = player.getLocation().getY();
+            if (Double.isNaN(state.lastElytraTickY)) {
+                state.lastElytraTickY = currentY;
+                state.elytraTicks = 1;
+                continue;
+            }
+
+            double deltaY = currentY - state.lastElytraTickY;
+            state.lastElytraTickY = currentY;
+            state.elytraTicks++;
+
+            if (Math.abs(deltaY) <= 0.005) {
+                state.elytraHoverTicks++;
+                if (state.elytraHoverTicks >= 40) {
+                    flag(player, "Elytra", "Sustained near-zero vertical movement was observed while gliding.");
+                    state.elytraHoverTicks = 0;
+                }
+            } else {
+                state.elytraHoverTicks = Math.max(0, state.elytraHoverTicks - 2);
+            }
+
+            boolean recentFirework = state.lastFireworkNanos != 0L
+                    && System.nanoTime() - state.lastFireworkNanos < 2_500_000_000L;
+            if (state.elytraTicks <= 3 && deltaY > 0.50 && !recentFirework) {
+                state.elytraKickBoostSamples++;
+                if (state.elytraKickBoostSamples >= 2) {
+                    flag(player, "Elytra", "An unusually strong upward impulse was observed immediately after gliding began without a recent firework boost.");
+                    state.elytraKickBoostSamples = 0;
+                }
+            } else {
+                state.elytraKickBoostSamples = Math.max(0, state.elytraKickBoostSamples - 1);
+            }
+
+            if (state.elytraTicks > 5 && deltaY > 0.12 && !recentFirework) {
+                state.elytraAscentSamples++;
+                if (state.elytraAscentSamples >= 4) {
+                    flag(player, "Elytra", "Repeated sustained ascent while gliding had no recent firework boost.");
+                    state.elytraAscentSamples = 0;
+                }
+            } else {
+                state.elytraAscentSamples = Math.max(0, state.elytraAscentSamples - 1);
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -774,6 +783,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
     }
 
     public void clearAll() {
+        if (elytraMonitorTask != null) elytraMonitorTask.cancel();
         states.clear();
     }
 
@@ -793,7 +803,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private long lastMoveNanos;
         private long lastPacketNanos;
         private long lastPhysicsSampleNanos;
-        private long elytraLastSampleNanos;
+        private double lastElytraTickY = Double.NaN;
         private double lastPhysicsX;
         private double lastPhysicsY;
         private double lastPhysicsZ;
