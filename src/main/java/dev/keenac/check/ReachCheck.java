@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ReachCheck implements Listener {
     private static final long HISTORY_NANOS = 1_500_000_000L;
     private static final long RECENT_PACKET_NANOS = 150_000_000L;
+    private static final long ATTACKER_SNAPSHOT_MAX_AGE_NANOS = 250_000_000L;
+    private static final int ATTACKER_SNAPSHOT_WINDOW = 5;
     private static final long MAX_FRAME_GAP_NANOS = 200_000_000L;
 
     private final KeenAC plugin;
@@ -130,6 +132,19 @@ public final class ReachCheck implements Listener {
         double eyeY = attacker.y + attacker.eyeHeight;
         double eyeZ = attacker.z;
         double distance = distanceToBox(eyeX, eyeY, eyeZ, target);
+
+        // Windfall-style short attacker history supplements KeenAC's existing
+        // target-hitbox rewind. It is intentionally bounded to five snapshots
+        // and 250 ms, and uses the closest plausible recent eye position.
+        for (PlayerFrame sample : attackerTrack.recentFrames(now)) {
+            if (!sample.eligible || !sample.worldId.equals(attacker.worldId)
+                    || now - sample.timestampNanos > ATTACKER_SNAPSHOT_MAX_AGE_NANOS) {
+                continue;
+            }
+            double snapshotDistance = distanceToBox(
+                    sample.x, sample.y + sample.eyeHeight, sample.z, target);
+            if (snapshotDistance < distance) distance = snapshotDistance;
+        }
 
         // The check remains active at every ping. Both rewind and added tolerance
         // are bounded so high latency cannot disable Reach or create an unlimited range.
@@ -245,6 +260,7 @@ public final class ReachCheck implements Listener {
     private static final class PlayerTrack {
         private volatile PlayerFrame snapshot;
         private volatile long lastPacketPositionNanos;
+        private final Deque<PlayerFrame> attackerSnapshots = new ArrayDeque<>();
 
         private synchronized void refresh(Player player, long now) {
             Location location = player.getLocation();
@@ -260,6 +276,7 @@ public final class ReachCheck implements Listener {
                     preservePacketPosition ? previous.z : location.getZ(),
                     player.getEyeHeight(), Math.max(0, player.getPing()),
                     isEligible(player), now);
+            remember(snapshot, now);
         }
 
         private synchronized void recordPacketPosition(double x, double y, double z, long now) {
@@ -269,6 +286,28 @@ public final class ReachCheck implements Listener {
             snapshot = new PlayerFrame(previous.playerId, previous.worldId,
                     x, y, z, previous.eyeHeight, previous.pingMillis,
                     previous.eligible, now);
+            remember(snapshot, now);
+        }
+
+        private void remember(PlayerFrame frame, long now) {
+            attackerSnapshots.addLast(frame);
+            while (attackerSnapshots.size() > ATTACKER_SNAPSHOT_WINDOW) {
+                attackerSnapshots.removeFirst();
+            }
+            while (!attackerSnapshots.isEmpty()
+                    && now - attackerSnapshots.peekFirst().timestampNanos
+                    > ATTACKER_SNAPSHOT_MAX_AGE_NANOS) {
+                attackerSnapshots.removeFirst();
+            }
+        }
+
+        private synchronized Deque<PlayerFrame> recentFrames(long now) {
+            while (!attackerSnapshots.isEmpty()
+                    && now - attackerSnapshots.peekFirst().timestampNanos
+                    > ATTACKER_SNAPSHOT_MAX_AGE_NANOS) {
+                attackerSnapshots.removeFirst();
+            }
+            return new ArrayDeque<>(attackerSnapshots);
         }
     }
 
