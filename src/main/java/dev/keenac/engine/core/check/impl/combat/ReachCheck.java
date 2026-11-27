@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityType;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
+import dev.keenac.KeenAC;
 import dev.keenac.engine.core.check.Check;
 import dev.keenac.engine.core.check.CheckData;
 import dev.keenac.engine.core.check.CompatFlag;
@@ -253,11 +254,24 @@ public class ReachCheck extends Check implements PacketCheck {
     private static final class TrackedEntity {
         private static final int MAX_HISTORY = 40;
         final EntityType type;
+        final double halfWidthX;
+        final double halfWidthZ;
+        final double height;
         volatile double x, y, z;
         volatile long timestamp;
         private final ArrayDeque<EntityPosition> history = new ArrayDeque<>();
         TrackedEntity(EntityType type, double x, double y, double z, long timestamp) {
+            this(type, x, y, z, timestamp,
+                    type == EntityTypes.PLAYER ? PLAYER_WIDTH / 2.0 : ENTITY_DEFAULT_SIZE / 2.0,
+                    type == EntityTypes.PLAYER ? PLAYER_WIDTH / 2.0 : ENTITY_DEFAULT_SIZE / 2.0,
+                    type == EntityTypes.PLAYER ? PLAYER_HEIGHT : ENTITY_DEFAULT_SIZE);
+        }
+        TrackedEntity(EntityType type, double x, double y, double z, long timestamp,
+                      double halfWidthX, double halfWidthZ, double height) {
             this.type = type;
+            this.halfWidthX = halfWidthX;
+            this.halfWidthZ = halfWidthZ;
+            this.height = height;
             update(x, y, z, timestamp);
         }
         synchronized void update(double x, double y, double z, long timestamp) {
