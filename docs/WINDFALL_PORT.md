@@ -41,7 +41,7 @@ cancel packets, or apply standalone punishments.
 | Illegal Move | `WindfallMovementCheckSuite`; non-finite/out-of-bounds and unexplained large position discontinuities |
 | Invalid Break / Place / Place Cursor | `WindfallMovementCheckSuite`; invalid dig targets, invalid placement heights/chunks, look-ray mismatch |
 | Multi Break / Place | `WindfallMovementCheckSuite`; action packet burst review |
-| NoSlow | Existing `NoSlowCheck` and `NoSlowMovementSpeed`; server-authoritative item-use sampling, potion/attribute allowances, friction exemptions and setback evidence are retained (the Windfall version was a simpler packet-rate heuristic) |
+| NoSlow | Existing `NoSlowCheck` and `NoSlowMovementSpeed`; server-authoritative item-use sampling, potion/attribute allowances, friction exemptions and setback evidence are retained; item-use tracking now also includes shields, bows, crossbows, tridents, spyglasses and goat horns (the Windfall version was a simpler packet-rate heuristic) |
 | No Swing | `WindfallMovementCheckSuite`; block interactions without a recent arm-swing packet |
 | Omni-Sprint | `WindfallMovementCheckSuite`; repeated backward movement while sprinting |
 | Phase | `WindfallMovementCheckSuite`; movement segments crossing solid block boundaries |
