@@ -140,23 +140,28 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
             reviewHitbox(attacker, targetPlayer, state, now);
         }
 
-        if (enabled("criticals") && !attacker.isOnGround()
-                && !attacker.isInsideVehicle() && !attacker.isGliding()
-                && !attacker.isSwimming() && !attacker.isClimbing()
-                && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
-                && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)) {
-            double downwardVelocity = -attacker.getVelocity().getY();
-            boolean validFallingMotion = downwardVelocity > 0.11
-                    && downwardVelocity < 0.50 && attacker.getFallDistance() > 0.05F;
-            if (!validFallingMotion) {
-                state.invalidCriticalAttacks++;
-                if (state.invalidCriticalAttacks >= 4) {
-                    flag(attacker, "Criticals",
-                            "Repeated airborne attacks lacked the expected falling motion for a vanilla critical hit.");
-                    state.invalidCriticalAttacks = 0;
-                }
-            } else {
+        if (enabled("criticals")) {
+            if (attacker.isOnGround()) {
                 state.invalidCriticalAttacks = Math.max(0, state.invalidCriticalAttacks - 1);
+            } else if (!attacker.isInsideVehicle() && !attacker.isGliding()
+                    && !attacker.isSwimming() && !attacker.isClimbing()
+                    && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
+                    && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)) {
+                double downwardVelocity = -attacker.getVelocity().getY();
+                boolean validFallingMotion = downwardVelocity > 0.11
+                        && downwardVelocity < 0.50;
+                // Mirror Windfall's deltaY >= -0.01 guard: an attack during a
+                // clear upward jump is not considered a failed critical attempt.
+                if (!validFallingMotion && downwardVelocity >= -0.01) {
+                    state.invalidCriticalAttacks++;
+                    if (state.invalidCriticalAttacks >= 4) {
+                        flag(attacker, "Criticals",
+                                "Repeated airborne attacks lacked the expected falling motion for a vanilla critical hit.");
+                        state.invalidCriticalAttacks = 0;
+                    }
+                } else {
+                    state.invalidCriticalAttacks = Math.max(0, state.invalidCriticalAttacks - 1);
+                }
             }
         }
     }
