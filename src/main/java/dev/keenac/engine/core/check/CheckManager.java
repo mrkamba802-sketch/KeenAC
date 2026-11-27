@@ -186,7 +186,7 @@ public final class CheckManager {
         violationPattern.clearPlayerHistory(uuid);
         plugin.getPingPongManager().onPlayerQuit(uuid);
         plugin.getLatencyCompensator().onPlayerQuit(uuid);
-        plugin.getTransactionManager().removePlayer(uuid);
+        plugin.getTransactionManager().onPlayerQuit(uuid);
     }
 
     public void reloadChecks() {
