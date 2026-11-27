@@ -599,10 +599,13 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
     }
 
     private void monitorElytraTick() {
-        if (!enabled("elytra")) return;
+        boolean elytraEnabled = enabled("elytra");
+        boolean velocityEnabled = enabled("velocity");
+        if (!elytraEnabled && !velocityEnabled) return;
         for (Player player : Bukkit.getOnlinePlayers()) {
             MovementState state = state(player);
-            monitorVelocityTick(player, state, System.nanoTime());
+            if (velocityEnabled) monitorVelocityTick(player, state, System.nanoTime());
+            if (!elytraEnabled) continue;
             if (!player.isGliding()) {
                 state.elytraTicks = 0;
                 state.elytraHoverTicks = 0;
