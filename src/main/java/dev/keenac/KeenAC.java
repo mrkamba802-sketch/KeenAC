@@ -22,9 +22,9 @@ import dev.keenac.check.NoWebCheck;
 import dev.keenac.check.ReachCheck;
 import dev.keenac.check.ScaffoldCheck;
 import dev.keenac.check.SilentSwapCheck;
-import dev.keenac.check.WindfallCombatCheckSuite;
-import dev.keenac.check.WindfallMovementCheckSuite;
-import dev.keenac.check.WindfallPacketCheckSuite;
+import dev.keenac.check.CombatCheckSuite;
+import dev.keenac.check.MovementCheckSuite;
+import dev.keenac.check.PacketCheckSuite;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -61,9 +61,9 @@ public final class KeenAC extends JavaPlugin {
     private BaritoneCheck baritoneCheck;
     private BaritoneACheck baritoneACheck;
     private ScaffoldCheck scaffoldCheck;
-    private WindfallCombatCheckSuite windfallCombatCheckSuite;
-    private WindfallMovementCheckSuite windfallMovementCheckSuite;
-    private WindfallPacketCheckSuite windfallPacketCheckSuite;
+    private CombatCheckSuite combatCheckSuite;
+    private MovementCheckSuite movementCheckSuite;
+    private PacketCheckSuite packetCheckSuite;
     private AlertManager alertManager;
     private PlayerContextManager playerContextManager;
     private EvidenceManager evidenceManager;
@@ -114,9 +114,9 @@ public final class KeenAC extends JavaPlugin {
         baritoneCheck = new BaritoneCheck(this);
         baritoneACheck = new BaritoneACheck(this);
         scaffoldCheck = new ScaffoldCheck(this);
-        windfallCombatCheckSuite = new WindfallCombatCheckSuite(this);
-        windfallMovementCheckSuite = new WindfallMovementCheckSuite(this);
-        windfallPacketCheckSuite = new WindfallPacketCheckSuite(this);
+        combatCheckSuite = new CombatCheckSuite(this);
+        movementCheckSuite = new MovementCheckSuite(this);
+        packetCheckSuite = new PacketCheckSuite(this);
         auraPacketListener = new PacketAuraListener(auraCheck);
         gameplayPacketListener = new PacketGameplayListener(
                 this, noSlowCheck, noWebCheck, scaffoldCheck, wallHitCheck);
@@ -138,9 +138,9 @@ public final class KeenAC extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(ghostMenuPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(silentSwapPacketListener);
-        PacketEvents.getAPI().getEventManager().registerListener(windfallCombatCheckSuite);
-        PacketEvents.getAPI().getEventManager().registerListener(windfallMovementCheckSuite);
-        PacketEvents.getAPI().getEventManager().registerListener(windfallPacketCheckSuite);
+        PacketEvents.getAPI().getEventManager().registerListener(combatCheckSuite);
+        PacketEvents.getAPI().getEventManager().registerListener(movementCheckSuite);
+        PacketEvents.getAPI().getEventManager().registerListener(packetCheckSuite);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(ghostMenuCheck, this);
@@ -158,9 +158,9 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(wallInteractCheck, this);
         Bukkit.getPluginManager().registerEvents(noSlowCheck, this);
         Bukkit.getPluginManager().registerEvents(noWebCheck, this);
-        Bukkit.getPluginManager().registerEvents(windfallCombatCheckSuite, this);
-        Bukkit.getPluginManager().registerEvents(windfallMovementCheckSuite, this);
-        Bukkit.getPluginManager().registerEvents(windfallPacketCheckSuite, this);
+        Bukkit.getPluginManager().registerEvents(combatCheckSuite, this);
+        Bukkit.getPluginManager().registerEvents(movementCheckSuite, this);
+        Bukkit.getPluginManager().registerEvents(packetCheckSuite, this);
 
         KeenACCommand executor = new KeenACCommand(this);
         getCommand("keenac").setExecutor(executor);
@@ -243,14 +243,14 @@ public final class KeenAC extends JavaPlugin {
             if (silentSwapPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(silentSwapPacketListener);
             }
-            if (windfallCombatCheckSuite != null) {
-                PacketEvents.getAPI().getEventManager().unregisterListener(windfallCombatCheckSuite);
+            if (combatCheckSuite != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(combatCheckSuite);
             }
-            if (windfallMovementCheckSuite != null) {
-                PacketEvents.getAPI().getEventManager().unregisterListener(windfallMovementCheckSuite);
+            if (movementCheckSuite != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(movementCheckSuite);
             }
-            if (windfallPacketCheckSuite != null) {
-                PacketEvents.getAPI().getEventManager().unregisterListener(windfallPacketCheckSuite);
+            if (packetCheckSuite != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(packetCheckSuite);
             }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
@@ -270,9 +270,9 @@ public final class KeenAC extends JavaPlugin {
         if (baritoneCheck != null) baritoneCheck.clearAll();
         if (baritoneACheck != null) baritoneACheck.clearAll();
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
-        if (windfallCombatCheckSuite != null) windfallCombatCheckSuite.clearAll();
-        if (windfallMovementCheckSuite != null) windfallMovementCheckSuite.clearAll();
-        if (windfallPacketCheckSuite != null) windfallPacketCheckSuite.clearAll();
+        if (combatCheckSuite != null) combatCheckSuite.clearAll();
+        if (movementCheckSuite != null) movementCheckSuite.clearAll();
+        if (packetCheckSuite != null) packetCheckSuite.clearAll();
         if (alertManager != null) alertManager.clearAll();
         if (evidenceManager != null) evidenceManager.clearAll();
         if (playerContextManager != null) playerContextManager.clearAll();
