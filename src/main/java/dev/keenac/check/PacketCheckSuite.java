@@ -53,14 +53,13 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
     private final Map<UUID, PacketState> states = new ConcurrentHashMap<>();
     private final BukkitTask transactionProbeTask;
     private int transactionSequence;
+    private long lastTransactionProbeNanos;
 
     public PacketCheckSuite(KeenAC plugin) {
         super(PacketListenerPriority.NORMAL);
         this.plugin = plugin;
-        long probeInterval = CheckSettings.longValue(
-                plugin, "packet.transaction", "probe-interval-ticks", 40L);
         this.transactionProbeTask = Bukkit.getScheduler().runTaskTimer(
-                plugin, this::sendTransactionProbes, probeInterval, probeInterval);
+                plugin, this::sendTransactionProbes, 1L, 1L);
     }
 
     @Override
@@ -286,19 +285,19 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
     private void reviewExploit(Player player, Integer windowId, Integer slot,
                                Integer entityId, long now) {
         if (!enabled("exploit")) return;
-        if (windowId != null && (windowId < 0 || windowId > CheckSettings.integer(plugin, "packet.exploit", "max-window-id", 200))) {
+        if (windowId != null && (windowId < CheckSettings.integer(plugin, "packet.exploit", "min-window-id", 0) || windowId > CheckSettings.integer(plugin, "packet.exploit", "max-window-id", 200))) {
             flag(player, "Exploit", "Inventory click packet contained an out-of-range window id.");
         }
-        if (slot != null && (slot < -1 || slot > CheckSettings.integer(plugin, "packet.exploit", "max-slot", 60))) {
+        if (slot != null && (slot < CheckSettings.integer(plugin, "packet.exploit", "min-slot", -1) || slot > CheckSettings.integer(plugin, "packet.exploit", "max-slot", 60))) {
             flag(player, "Exploit", "Inventory click packet contained an out-of-range slot.");
         }
-        if (entityId != null && (entityId < -1 || entityId > CheckSettings.integer(plugin, "packet.exploit", "max-entity-id", 20000))) {
+        if (entityId != null && (entityId < CheckSettings.integer(plugin, "packet.exploit", "min-entity-id", -1) || entityId > CheckSettings.integer(plugin, "packet.exploit", "max-entity-id", 20000))) {
             flag(player, "Exploit", "Entity interaction packet contained an out-of-range entity id.");
         }
     }
 
     private void reviewCreative(Player player, PacketState state, int slot, long now) {
-        if (slot < -1 || slot > CheckSettings.integer(plugin, "packet.creative", "max-slot", 60)) {
+        if (slot < CheckSettings.integer(plugin, "packet.creative", "min-slot", -1) || slot > CheckSettings.integer(plugin, "packet.creative", "max-slot", 60)) {
             if (enabled("exploit")) flag(player, "Exploit", "Creative inventory packet contained an invalid slot.");
         }
         if (!enabled("creative")) return;
@@ -476,6 +475,10 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
     private void sendTransactionProbes() {
         if (!enabled("transaction") || !plugin.isEnabled()) return;
         long now = System.nanoTime();
+        long intervalNanos = CheckSettings.longValue(
+                plugin, "packet.transaction", "probe-interval-ticks", 40L) * 50_000_000L;
+        if (lastTransactionProbeNanos != 0L && now - lastTransactionProbeNanos < intervalNanos) return;
+        lastTransactionProbeNanos = now;
         for (Player player : Bukkit.getOnlinePlayers()) {
             PacketState state = states.computeIfAbsent(player.getUniqueId(), ignored -> new PacketState());
             int ping = Math.max(0, plugin.getPlayerContextManager().snapshot(player).pingMs());
