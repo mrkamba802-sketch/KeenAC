@@ -392,45 +392,34 @@ public final class NoSlowCheck implements Listener {
      * movement-speed potion/attribute modifiers.
      */
     private double getAllowedItemUseSpeed(Player player, boolean inWater) {
+        // When enabled, potion-driven movement attribute changes (for example
+        // Speed/Slowness) and Dolphin's Grace are included in the allowance.
+        boolean includePotionEffects =
+                plugin.getConfig().getBoolean("checks.no-slow.potion-effects", true);
         double movementMultiplier = 1.0;
-        if (player.getAttribute(Attribute.MOVEMENT_SPEED) != null) {
-            Attribute movement = Attribute.MOVEMENT_SPEED;
+        Attribute movement = Attribute.MOVEMENT_SPEED;
+        if (player.getAttribute(movement) != null) {
             double base = player.getAttribute(movement).getBaseValue();
-            double value = player.getAttribute(movement).getValue();
+            double value = includePotionEffects
+                    ? player.getAttribute(movement).getValue() : base;
             if (base > 0.0) {
                 movementMultiplier = Math.max(0.75, Math.min(4.0, value / base));
             }
         }
 
+        int depthStrider = 0;
         if (inWater) {
-            int depthStrider = 0;
             ItemStack boots = player.getInventory().getBoots();
             if (boots != null) {
                 depthStrider = boots.getEnchantmentLevel(Enchantment.DEPTH_STRIDER);
             }
-
-            double fullWaterSpeed;
-            if (player.hasPotionEffect(PotionEffectType.DOLPHINS_GRACE)) {
-                // Java Edition Dolphin's Grace combines with Depth Strider.
-                fullWaterSpeed = 9.8 + 8.983 * depthStrider;
-            } else if (player.isSwimming() && player.isSprinting()) {
-                // Sprint-swimming speed; Depth Strider III reaches about 5.3 blocks/sec.
-                fullWaterSpeed = 3.918 * (1.0 + 0.118 * depthStrider);
-            } else if (player.isSwimming()) {
-                fullWaterSpeed = 2.20 * (1.0 + depthStrider / 3.0);
-            } else {
-                fullWaterSpeed = 1.97 * (1.0 + depthStrider / 3.0);
-            }
-            return fullWaterSpeed * movementMultiplier * 0.2;
         }
 
-        // Normal walking speed is approximately 4.317 blocks/sec at the
-        // default movement attribute. Sprinting increases it by about 30%.
-        double fullGroundSpeed = 4.317 * movementMultiplier;
-        if (player.isSprinting()) {
-            fullGroundSpeed *= 1.3;
-        }
-        return fullGroundSpeed * 0.2;
+        boolean dolphinsGrace = includePotionEffects
+                && player.hasPotionEffect(PotionEffectType.DOLPHINS_GRACE);
+        return NoSlowMovementSpeed.allowedItemUseSpeed(
+                inWater, dolphinsGrace, player.isSwimming(), player.isSprinting(),
+                depthStrider, movementMultiplier);
     }
 
     private boolean isExempt(Player player, Block block) {
