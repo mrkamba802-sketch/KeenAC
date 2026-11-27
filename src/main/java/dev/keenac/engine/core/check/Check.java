@@ -40,7 +40,7 @@ public abstract class Check {
         var config = plugin.getKeenACConfig();
         enabled = config.isCheckEnabled(stableKey);
         maxVl = config.getCheckMaxVl(stableKey);
-        punishable = false;
+        punishable = config.isCheckPunishable(stableKey);
         Integer explicitSetback = config.getExplicitCheckSetbackVl(stableKey);
         if (explicitSetback != null) setbackVl = explicitSetback;
         Double explicitDecay = config.getExplicitCheckDecay(stableKey);
@@ -107,7 +107,7 @@ public abstract class Check {
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public boolean isPunishable() { return punishable; }
-    public void setPunishable(boolean punishable) { this.punishable = false; }
+    public void setPunishable(boolean punishable) { this.punishable = punishable; }
     public double getDecay() { return decay; }
     public void setDecay(double decay) { this.decay = decay; }
     public int getMaxVl() { return maxVl; }
