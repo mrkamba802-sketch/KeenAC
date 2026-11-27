@@ -39,14 +39,16 @@ public final class PacketBaritoneListener extends PacketListenerAbstract {
 
         if (!movement.hasPositionChanged()) {
             float yaw = location.getYaw();
+            float pitch = location.getPitch();
             check.recordRotation(player.getUniqueId(), yaw);
-            checkA.recordRotation(player.getUniqueId(), yaw);
+            checkA.recordRotation(player.getUniqueId(), yaw, pitch);
             return;
         }
 
         check.recordMovement(player.getUniqueId(), location.getX(), location.getZ(),
                 location.getYaw(), movement.hasRotationChanged(), movement.isOnGround());
         checkA.recordMovement(player.getUniqueId(), location.getX(), location.getZ(),
-                location.getYaw(), movement.hasRotationChanged(), movement.isOnGround());
+                location.getYaw(), location.getPitch(),
+                movement.hasRotationChanged(), movement.isOnGround());
     }
 }
