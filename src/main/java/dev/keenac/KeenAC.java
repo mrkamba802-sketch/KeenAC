@@ -3,6 +3,8 @@ package dev.keenac;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
+import dev.keenac.context.PlayerContextManager;
+import dev.keenac.evidence.EvidenceManager;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.AuraCheck;
 import dev.keenac.check.AimCheck;
@@ -55,6 +57,8 @@ public final class KeenAC extends JavaPlugin {
     private BaritoneCheck baritoneCheck;
     private ScaffoldCheck scaffoldCheck;
     private AlertManager alertManager;
+    private PlayerContextManager playerContextManager;
+    private EvidenceManager evidenceManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract auraPacketListener;
     private PacketListenerAbstract gameplayPacketListener;
@@ -77,6 +81,9 @@ public final class KeenAC extends JavaPlugin {
         }
 
         saveDefaultConfig();
+        playerContextManager = new PlayerContextManager();
+        Bukkit.getPluginManager().registerEvents(playerContextManager, this);
+        evidenceManager = new EvidenceManager(this, playerContextManager);
         alertManager = new AlertManager(this);
         movementSetbackManager = new MovementSetbackManager(this);
         Bukkit.getPluginManager().registerEvents(movementSetbackManager, this);
@@ -165,6 +172,14 @@ public final class KeenAC extends JavaPlugin {
         return alertManager;
     }
 
+    public PlayerContextManager getPlayerContextManager() {
+        return playerContextManager;
+    }
+
+    public EvidenceManager getEvidenceManager() {
+        return evidenceManager;
+    }
+
     public void reloadChecks() {
         if (inventoryAutoSwapCheck != null) inventoryAutoSwapCheck.reloadSettings();
         if (silentSwapCheck != null) silentSwapCheck.reloadSettings();
@@ -226,5 +241,7 @@ public final class KeenAC extends JavaPlugin {
         if (baritoneCheck != null) baritoneCheck.clearAll();
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
         if (alertManager != null) alertManager.clearAll();
+        if (evidenceManager != null) evidenceManager.clearAll();
+        if (playerContextManager != null) playerContextManager.clearAll();
     }
 }
