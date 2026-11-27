@@ -47,7 +47,6 @@ public final class MotionCheck implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, Deque<Long>> suspicionTimes = new HashMap<>();
     private final Map<UUID, Long> reviewUntil = new HashMap<>();
-    private final Map<UUID, Long> lastVelocityAt = new HashMap<>();
     private final Map<UUID, Long> lastGlideChangeAt = new HashMap<>();
     private final Map<UUID, Location> lastJumpOrigin = new HashMap<>();
     private final Map<UUID, Long> lastJumpAt = new HashMap<>();
@@ -414,11 +413,10 @@ public final class MotionCheck implements Listener {
     private void refreshMotionPacketProfile(Player player, boolean enabled) {
         UUID id = player.getUniqueId();
         Location location = player.getLocation();
-        long now = System.currentTimeMillis();
-        long velocityAt = lastVelocityAt.getOrDefault(id, 0L);
         long velocityGrace = Math.max(0L,
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
-        boolean recentVelocity = velocityAt > 0L && now - velocityAt <= velocityGrace;
+        boolean recentVelocity = plugin.getPlayerContextManager()
+                .isWithinVelocityGrace(id, System.nanoTime(), velocityGrace);
 
         boolean unsupportedSurface = isUnsupportedMovementSurface(location)
                 || isUnsupportedMovementSurface(location.clone().subtract(0.0, 0.7, 0.0));
@@ -808,10 +806,10 @@ public final class MotionCheck implements Listener {
             effects = "none";
         }
 
-        long velocityAt = lastVelocityAt.getOrDefault(player.getUniqueId(), 0L);
         long velocityGrace = Math.max(0L,
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
-        boolean recentVelocity = velocityAt > 0L && now - velocityAt <= velocityGrace;
+        boolean recentVelocity = plugin.getPlayerContextManager()
+                .isWithinVelocityGrace(player.getUniqueId(), System.nanoTime(), velocityGrace);
         Vector velocity = player.getVelocity();
 
         return "movementAttribute=" + movementValue
@@ -976,10 +974,10 @@ public final class MotionCheck implements Listener {
             }
 
             long now = System.currentTimeMillis();
-            long velocityAt = lastVelocityAt.getOrDefault(id, 0L);
             long velocityGrace = Math.max(0L,
                     plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
-            if (velocityAt > 0L && now - velocityAt <= velocityGrace) {
+            if (plugin.getPlayerContextManager()
+                    .isWithinVelocityGrace(id, System.nanoTime(), velocityGrace)) {
                 return;
             }
 
@@ -1041,7 +1039,6 @@ public final class MotionCheck implements Listener {
             event.setVelocity(new Vector(0.0, 0.0, 0.0));
             return;
         }
-        lastVelocityAt.put(id, System.currentTimeMillis());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -1076,7 +1073,6 @@ public final class MotionCheck implements Listener {
     public void clear(UUID id) {
         suspicionTimes.remove(id);
         reviewUntil.remove(id);
-        lastVelocityAt.remove(id);
         lastGlideChangeAt.remove(id);
         lastJumpOrigin.remove(id);
         lastJumpAt.remove(id);
@@ -1102,7 +1098,6 @@ public final class MotionCheck implements Listener {
     public void clearAll() {
         suspicionTimes.clear();
         reviewUntil.clear();
-        lastVelocityAt.clear();
         lastGlideChangeAt.clear();
         lastJumpOrigin.clear();
         lastJumpAt.clear();
