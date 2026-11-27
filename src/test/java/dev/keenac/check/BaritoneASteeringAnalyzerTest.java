@@ -36,11 +36,11 @@ class BaritoneASteeringAnalyzerTest {
     void requiresEnoughConsistentTurns() {
         List<BaritoneASteeringAnalyzer.TurnSample> turns = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
-            turns.add(new BaritoneASteeringAnalyzer.TurnSample(45.0, 48.0, 2.0));
+            turns.add(new BaritoneASteeringAnalyzer.TurnSample(45.0, 48.0, 2.0, i + 1L));
         }
 
         assertFalse(BaritoneASteeringAnalyzer.hasConsistentSteering(turns, 8, 8.0));
-        turns.add(new BaritoneASteeringAnalyzer.TurnSample(-45.0, -48.0, 2.5));
+        turns.add(new BaritoneASteeringAnalyzer.TurnSample(-45.0, -48.0, 2.5, 8L));
         assertTrue(BaritoneASteeringAnalyzer.hasConsistentSteering(turns, 8, 8.0));
     }
 
@@ -48,7 +48,7 @@ class BaritoneASteeringAnalyzerTest {
     void rejectsUnusuallyLargeAverageYawError() {
         List<BaritoneASteeringAnalyzer.TurnSample> turns = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
-            turns.add(new BaritoneASteeringAnalyzer.TurnSample(45.0, 55.0, 2.0));
+            turns.add(new BaritoneASteeringAnalyzer.TurnSample(45.0, 55.0, 2.0, i + 1L));
         }
 
         assertFalse(BaritoneASteeringAnalyzer.hasConsistentSteering(turns, 8, 8.0));
