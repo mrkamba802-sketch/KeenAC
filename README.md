@@ -1,6 +1,6 @@
-# KeenAC
+# KeenAC 1.0.0
 
-AirStuck detection for Paper and Purpur powered by PacketEvents.
+Modular anticheat for Paper and Purpur powered by PacketEvents. Includes configurable combat, movement, packet and inventory checks, shared evidence history, staff alerts and movement diagnostics.
 
 ## Dependencies
 
@@ -16,9 +16,13 @@ AirStuck detection for Paper and Purpur powered by PacketEvents.
 
 ## Build
 
-Run `gradle test` to execute the regression tests, or `gradle build` with JDK 21 to run tests and build the plugin. The plugin JAR is written to `build/libs/KeenAC-1.2.2.jar`.
+Run `gradle test` to execute the regression tests, or `gradle build` with JDK 21 to run tests and build the plugin. The plugin JAR is written to `build/libs/KeenAC-1.0.0.jar`.
 
 GitHub Actions builds the JAR on each push and publishes it as a workflow artifact.
+
+## Check configuration
+
+Every added check has its own `enabled` switch and individual thresholds under `checks.combat`, `checks.movement` and `checks.packet` in `config.yml`. Adjust sample counts, confirmation windows, distance limits, ping ceilings, movement tolerances and packet rates without recompiling. Existing KeenAC checks keep their separate configuration sections.
 
 ## Detection
 
@@ -38,6 +42,10 @@ Every check signal is recorded with the check name, violation level, reason, and
 Staff with `keenac.review` can inspect the latest records using `/keenac review <player>`. The permission defaults to operators and can be changed with `commands.review-permission`. Alert notifications can be disabled independently; evidence recording remains active while the plugin is enabled.
 
 The `checks.no-slow.potion-effects` option controls whether potion-driven movement attribute changes and Dolphin's Grace are included in the NoSlow movement allowance. When disabled, the check uses the base movement attribute and does not apply the Dolphin's Grace bonus.
+
+## Combat, movement, packet and inventory checks
+
+KeenAC keeps its check suites under native project names. Individual parameters can be tuned in `config.yml`; the defaults are conservative starting points and should be validated on the target server before any enforcement is introduced.
 
 ## Baritone movement review
 
