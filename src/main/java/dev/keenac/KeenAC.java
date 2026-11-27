@@ -184,7 +184,6 @@ public final class KeenAC extends JavaPlugin {
             var uuid = event.getPlayer().getUniqueId();
             if (checkManager != null) checkManager.removePlayer(uuid);
             if (playerManager != null) playerManager.remove(uuid);
-            if (geyserManager != null) geyserManager.onPlayerQuit(uuid);
         }
     }
 }
