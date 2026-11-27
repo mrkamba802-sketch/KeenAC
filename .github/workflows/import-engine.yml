@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "engine-import/*.b64"
+      - "engine-import/IMPORT_READY"
 
 permissions:
   contents: write
