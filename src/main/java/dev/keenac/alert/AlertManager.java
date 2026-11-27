@@ -67,10 +67,11 @@ public final class AlertManager {
     }
 
     public void send(String checkName, Player suspect, int violationLevel, String reason) {
-        if (suspect == null || !plugin.isEnabled()
-                || !plugin.getConfig().getBoolean("alerts.enabled", true)) return;
+        if (suspect == null || !plugin.isEnabled()) return;
 
         UUID playerId = suspect.getUniqueId();
+        recordEvidence(playerId, checkName, violationLevel, reason);
+        if (!plugin.getConfig().getBoolean("alerts.enabled", true)) return;
         AlertKey key = new AlertKey(playerId, checkName);
         DeliveryState state = deliveryStates.computeIfAbsent(key, ignored -> new DeliveryState());
         PendingAlert immediate = null;
@@ -101,6 +102,25 @@ public final class AlertManager {
 
         if (immediate != null) {
             dispatch(immediate);
+        }
+    }
+
+    private void recordEvidence(UUID playerId, String checkName, int violationLevel, String reason) {
+        Runnable capture = () -> {
+            if (!plugin.isEnabled()) return;
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                plugin.getEvidenceManager().record(player, checkName, violationLevel, reason);
+            }
+        };
+        if (Bukkit.isPrimaryThread()) {
+            capture.run();
+        } else {
+            try {
+                Bukkit.getScheduler().runTask(plugin, capture);
+            } catch (RuntimeException ignored) {
+                // Ignore evidence capture if the plugin is already shutting down.
+            }
         }
     }
 
@@ -185,11 +205,10 @@ public final class AlertManager {
                 "alerts.format", "{prefix} &f{player} &7failed &c{check} &8(x{vl})");
         String safeReason = reason == null || reason.isBlank()
                 ? "No additional reason was recorded." : reason;
-        int ping = suspect.getPing();
-        double[] recentTps = Bukkit.getTPS();
-        double tps = recentTps.length == 0 ? 20.0 : recentTps[0];
-        String tpsText = Double.isFinite(tps)
-                ? String.format(Locale.ROOT, "%.2f", tps) : "unknown";
+        var context = plugin.getPlayerContextManager().snapshot(suspect);
+        int ping = context.pingMs();
+        double tps = context.tps();
+        String tpsText = String.format(Locale.ROOT, "%.2f", tps);
 
         String templated = format
                 .replace("{prefix}", prefix)
