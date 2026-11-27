@@ -124,11 +124,13 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
 
         if (enabled("criticals") && !attacker.isOnGround()
                 && !attacker.isInsideVehicle() && !attacker.isGliding()
-                && !attacker.isSwimming() && !attacker.isClimbing()) {
+                && !attacker.isSwimming() && !attacker.isClimbing()
+                && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
+                && !attacker.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION)) {
             double downwardVelocity = -attacker.getVelocity().getY();
             boolean validFallingMotion = downwardVelocity > 0.11
                     && downwardVelocity < 0.50 && attacker.getFallDistance() > 0.05F;
-            if (!validFallingMotion && attacker.getVelocity().getY() >= -0.01) {
+            if (!validFallingMotion) {
                 state.invalidCriticalAttacks++;
                 if (state.invalidCriticalAttacks >= 4) {
                     flag(attacker, "Criticals",
