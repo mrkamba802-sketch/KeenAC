@@ -219,12 +219,15 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
 
         if (interval > 250_000_000L) {
             state.previousVerticalDelta = deltaY;
+            state.previousPhysicsTicks = Math.max(1, Math.min(4,
+                    (int) Math.round(interval / 50_000_000.0)));
             state.gravitySamples = 0;
             state.simulationSamples = 0;
             return;
         }
         if (clientGround || player.isOnGround() || isGravityExempt(player)) {
             state.previousVerticalDelta = 0.0;
+            state.previousPhysicsTicks = 1;
             state.gravitySamples = 0;
             state.simulationSamples = 0;
             return;
@@ -235,6 +238,8 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
                 || (context.velocityAgeMs() >= 0L && context.velocityAgeMs() < 500L)
                 || horizontalDelta < 0.04) {
             state.previousVerticalDelta = deltaY;
+            state.previousPhysicsTicks = Math.max(1, Math.min(4,
+                    (int) Math.round(interval / 50_000_000.0)));
             state.gravitySamples = 0;
             state.simulationSamples = 0;
             return;
@@ -243,9 +248,12 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         // Predict multiple 20 TPS steps when the client sends a packet slightly late.
         int elapsedTicks = Math.max(1, Math.min(4,
                 (int) Math.round(interval / 50_000_000.0)));
-        double predicted = state.previousVerticalDelta;
+        double predictedVelocity = state.previousVerticalDelta
+                / Math.max(1, state.previousPhysicsTicks);
+        double predicted = 0.0;
         for (int tick = 0; tick < elapsedTicks; tick++) {
-            predicted = (predicted - 0.08) * 0.98;
+            predictedVelocity = (predictedVelocity - 0.08) * 0.98;
+            predicted += predictedVelocity;
         }
         double deviation = Math.abs(deltaY - predicted);
 
@@ -275,6 +283,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             }
         }
         state.previousVerticalDelta = deltaY;
+        state.previousPhysicsTicks = elapsedTicks;
     }
 
     private boolean isGravityExempt(Player player) {
@@ -818,6 +827,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private double lastPhysicsZ;
         private long knockbackStartedNanos;
         private double previousVerticalDelta;
+        private int previousPhysicsTicks = 1;
         private Vector expectedKnockback;
         private Vector knockbackDirection;
         private double expectedKnockbackHorizontal;
