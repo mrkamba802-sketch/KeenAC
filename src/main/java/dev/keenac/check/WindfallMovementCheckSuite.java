@@ -124,7 +124,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             double dx = x - state.lastPacketX;
             double dy = y - state.lastPacketY;
             double dz = z - state.lastPacketZ;
-            reviewGravitySimulation(player, state, dy, Math.hypot(dx, dz), clientGround, now);
+            reviewGravitySimulation(player, state, x, y, z, clientGround, now);
             double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             long teleportAge = plugin.getPlayerContextManager().snapshot(player).teleportAgeMs();
             if (enabled("illegal-move") && distance > 8.0
@@ -193,16 +193,34 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
     }
 
     private void reviewGravitySimulation(Player player, MovementState state,
-                                          double deltaY, double horizontalDelta,
+                                          double x, double y, double z,
                                           boolean clientGround, long now) {
-        if (clientGround || player.isOnGround() || isGravityExempt(player)) {
-            state.previousVerticalDelta = 0.0;
+        if (state.lastPhysicsSampleNanos == 0L) {
+            state.lastPhysicsSampleNanos = now;
+            state.lastPhysicsX = x;
+            state.lastPhysicsY = y;
+            state.lastPhysicsZ = z;
+            return;
+        }
+
+        long interval = now - state.lastPhysicsSampleNanos;
+        if (interval < 40_000_000L) return;
+
+        double deltaY = y - state.lastPhysicsY;
+        double horizontalDelta = Math.hypot(x - state.lastPhysicsX, z - state.lastPhysicsZ);
+        state.lastPhysicsSampleNanos = now;
+        state.lastPhysicsX = x;
+        state.lastPhysicsY = y;
+        state.lastPhysicsZ = z;
+
+        if (interval > 250_000_000L) {
+            state.previousVerticalDelta = deltaY;
             state.gravitySamples = 0;
             state.simulationSamples = 0;
             return;
         }
-        if (now - state.lastPacketNanos > 300_000_000L) {
-            state.previousVerticalDelta = deltaY;
+        if (clientGround || player.isOnGround() || isGravityExempt(player)) {
+            state.previousVerticalDelta = 0.0;
             state.gravitySamples = 0;
             state.simulationSamples = 0;
             return;
@@ -218,8 +236,13 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             return;
         }
 
-        // Modern vanilla vertical motion: gravity followed by air drag.
-        double predicted = (state.previousVerticalDelta - 0.08) * 0.98;
+        // Predict multiple 20 TPS steps when the client sends a packet slightly late.
+        int elapsedTicks = Math.max(1, Math.min(4,
+                (int) Math.round(interval / 50_000_000.0)));
+        double predicted = state.previousVerticalDelta;
+        for (int tick = 0; tick < elapsedTicks; tick++) {
+            predicted = (predicted - 0.08) * 0.98;
+        }
         double deviation = Math.abs(deltaY - predicted);
 
         if (enabled("gravity")) {
@@ -578,11 +601,15 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         if (!enabled("elytra")) return;
         if (!player.isGliding()) {
             state.elytraTicks = 0;
+            state.elytraLastSampleNanos = 0L;
             state.elytraHoverTicks = 0;
             state.elytraAscentSamples = 0;
             return;
         }
 
+        if (state.elytraLastSampleNanos != 0L
+                && now - state.elytraLastSampleNanos < 40_000_000L) return;
+        state.elytraLastSampleNanos = now;
         state.elytraTicks++;
         if (Math.abs(deltaY) <= 0.005) {
             state.elytraHoverTicks++;
@@ -765,6 +792,11 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private long lastJumpNanos;
         private long lastMoveNanos;
         private long lastPacketNanos;
+        private long lastPhysicsSampleNanos;
+        private long elytraLastSampleNanos;
+        private double lastPhysicsX;
+        private double lastPhysicsY;
+        private double lastPhysicsZ;
         private long knockbackStartedNanos;
         private double previousVerticalDelta;
         private Vector expectedKnockback;
