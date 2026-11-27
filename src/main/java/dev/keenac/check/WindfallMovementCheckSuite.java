@@ -535,7 +535,6 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         Player player = event.getPlayer();
         MovementState state = state(player);
         long now = System.nanoTime();
-        reviewVelocityResponse(player, state, to.clone().subtract(from).toVector());
         double dx = to.getX() - from.getX();
         double dy = to.getY() - from.getY();
         double dz = to.getZ() - from.getZ();
@@ -603,6 +602,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         if (!enabled("elytra")) return;
         for (Player player : Bukkit.getOnlinePlayers()) {
             MovementState state = state(player);
+            monitorVelocityTick(player, state, System.nanoTime());
             if (!player.isGliding()) {
                 state.elytraTicks = 0;
                 state.elytraHoverTicks = 0;
@@ -676,45 +676,36 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
 
         MovementState state = state(player);
         state.expectedKnockback = velocity;
+        state.expectedKnockbackHorizontal = horizontal;
         state.knockbackDirection = new Vector(velocity.getX(), 0.0, velocity.getZ()).normalize();
-        state.knockbackProjection = 0.0;
-        state.knockbackSamples = 0;
+        state.knockbackStartLocation = player.getLocation().clone();
         state.knockbackStartedNanos = System.nanoTime();
     }
 
-    private void reviewVelocityResponse(Player player, MovementState state, Vector delta) {
-        if (!enabled("velocity") || state.expectedKnockback == null) return;
-        long age = System.nanoTime() - state.knockbackStartedNanos;
-        if (age > 450_000_000L || player.isInsideVehicle() || player.isFlying()
-                || player.isGliding() || player.isSwimming() || player.isInWater()) {
-            finishVelocityReview(player, state);
-            return;
-        }
-        if (plugin.getPlayerContextManager().snapshot(player).pingMs() > 160) {
-            state.expectedKnockback = null;
-            return;
-        }
-
-        Location origin = player.getLocation().add(0.0, 0.9, 0.0);
-        RayTraceResult obstruction = player.getWorld().rayTraceBlocks(
-                origin, state.knockbackDirection, 0.55);
-        if (obstruction != null && obstruction.getHitBlock() != null) {
-            state.expectedKnockback = null;
-            return;
-        }
-
-        state.knockbackProjection += delta.getX() * state.knockbackDirection.getX()
-                + delta.getZ() * state.knockbackDirection.getZ();
-        state.knockbackSamples++;
-        if (state.knockbackSamples >= 4) finishVelocityReview(player, state);
-    }
 
     private void finishVelocityReview(Player player, MovementState state) {
-        if (state.expectedKnockback == null) return;
-        double expected = Math.hypot(state.expectedKnockback.getX(),
-                state.expectedKnockback.getZ()) * 0.85;
-        if (state.knockbackSamples >= 3 && expected > 0.35
-                && state.knockbackProjection < expected * 0.20) {
+        if (state.expectedKnockback == null || state.knockbackStartLocation == null) return;
+        if (player.getWorld() != state.knockbackStartLocation.getWorld()
+                || player.isInsideVehicle() || player.isFlying() || player.isGliding()
+                || player.isSwimming() || player.isInWater()
+                || plugin.getPlayerContextManager().snapshot(player).pingMs() > 160) {
+            clearVelocityReview(state);
+            return;
+        }
+
+        Location start = state.knockbackStartLocation.clone().add(0.0, 0.9, 0.0);
+        RayTraceResult obstruction = player.getWorld().rayTraceBlocks(
+                start, state.knockbackDirection, 0.60);
+        if (obstruction != null && obstruction.getHitBlock() != null) {
+            clearVelocityReview(state);
+            return;
+        }
+
+        Vector actual = player.getLocation().toVector()
+                .subtract(state.knockbackStartLocation.toVector());
+        double actualProjection = actual.dot(state.knockbackDirection);
+        double expected = state.expectedKnockbackHorizontal * 2.0;
+        if (expected > 0.55 && actualProjection < expected * 0.20) {
             state.velocityRejects++;
             if (state.velocityRejects >= 2) {
                 flag(player, "Velocity", "Repeated server velocity impulses produced substantially less movement than expected.");
@@ -723,9 +714,24 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         } else {
             state.velocityRejects = Math.max(0, state.velocityRejects - 1);
         }
+        clearVelocityReview(state);
+    }
+
+    private void clearVelocityReview(MovementState state) {
         state.expectedKnockback = null;
         state.knockbackDirection = null;
+        state.knockbackStartLocation = null;
+        state.expectedKnockbackHorizontal = 0.0;
+        state.knockbackStartedNanos = 0L;
     }
+
+    private void monitorVelocityTick(Player player, MovementState state, long now) {
+        if (state.expectedKnockback == null) return;
+        if (now - state.knockbackStartedNanos >= 200_000_000L) {
+            finishVelocityReview(player, state);
+        }
+    }
+
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onJump(PlayerJumpEvent event) {
@@ -811,8 +817,8 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private double previousVerticalDelta;
         private Vector expectedKnockback;
         private Vector knockbackDirection;
-        private double knockbackProjection;
-        private int knockbackSamples;
+        private double expectedKnockbackHorizontal;
+        private Location knockbackStartLocation;
         private int velocityRejects;
         private int elytraTicks;
         private int elytraHoverTicks;
