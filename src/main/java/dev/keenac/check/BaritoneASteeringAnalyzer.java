@@ -9,7 +9,8 @@ public final class BaritoneASteeringAnalyzer {
     public record TurnSample(
             double directionTurnDegrees,
             double yawTurnDegrees,
-            double segmentDistance
+            double segmentDistance,
+            long timestampNanos
     ) { }
 
     public static boolean matchesTurn(
