@@ -15,14 +15,14 @@ cancel packets, or apply standalone punishments.
 | Autoclicker | `WindfallCombatCheckSuite`; rolling attack-interval variance |
 | Backtrack | `WindfallCombatCheckSuite`; recent target movement plus bounded ping review |
 | Criticals | `WindfallCombatCheckSuite`; repeated airborne attacks without valid falling motion |
-| Fast Heal | `WindfallCombatCheckSuite`; repeated item-consume completions at implausible intervals |
+| Fast Heal | Legacy-only upstream check (protocols 5–107); disabled by default on 1.21.4. The optional local item-consume timing signal is not enabled for this target |
 | Hitboxes | `WindfallCombatCheckSuite`; server look-ray versus target hitbox |
 | Kill Aura | Existing `AuraCheck` is retained; new multi-target-per-window signal added to `WindfallCombatCheckSuite` |
 | Macro | `WindfallCombatCheckSuite`; repeated ground-movement direction sequences |
 | Multi Interact | `WindfallCombatCheckSuite`; distinct attack targets inside a short packet window |
 | Reach | Existing `ReachCheck`; historical target hitboxes, bounded ping rewind, and a five-frame/250 ms attacker-position window are combined |
 | Self Interact | `WindfallCombatCheckSuite`; self entity-id interaction |
-| Sword Block | Disabled by default: legacy sword-block combat is not present on 1.21.4 |
+| Sword Block | Legacy-only upstream check (protocols 5–107); disabled by default because legacy sword-block combat is not present on 1.21.4 |
 | Crystal | `WindfallCombatCheckSuite`; rapid crystal place/attack timing |
 | Interact Cursor | `WindfallCombatCheckSuite`; entity interaction versus server look-ray |
 
