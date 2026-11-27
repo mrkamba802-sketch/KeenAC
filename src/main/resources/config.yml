@@ -73,6 +73,29 @@ checks:
         enabled: true
       wrong-break:
         enabled: true
+    packet:
+      bad-packets:
+        enabled: true
+      chat:
+        enabled: true
+      chest-stealer:
+        enabled: true
+      client-brand:
+        enabled: true
+      crash:
+        enabled: true
+      creative:
+        enabled: true
+      exploit:
+        enabled: true
+      inventory:
+        enabled: true
+      packet-order:
+        enabled: true
+      sprint:
+        enabled: true
+      vehicle:
+        enabled: true
   # Shared server-authoritative correction used by Motion and NoSlow.
   movement-setback:
     enabled: true
