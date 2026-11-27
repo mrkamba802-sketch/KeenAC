@@ -35,7 +35,6 @@ public final class NoWebCheck implements Listener {
     private final Map<UUID, PlayerState> states = new HashMap<>();
     private final Map<UUID, Long> elytraGraceUntilNanos = new HashMap<>();
     private final Map<UUID, Long> pearlGraceUntilNanos = new HashMap<>();
-    private final Map<UUID, Long> velocityGraceUntilNanos = new HashMap<>();
     private final Set<UUID> pearlBaselinePending = new java.util.HashSet<>();
     private final Map<UUID, ConcurrentLinkedQueue<PacketPosition>> packetPositions =
             new ConcurrentHashMap<>();
@@ -55,7 +54,6 @@ public final class NoWebCheck implements Listener {
             states.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
             lastPacketLocations.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
             pearlGraceUntilNanos.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
-            velocityGraceUntilNanos.keySet().removeIf(id -> Bukkit.getPlayer(id) == null);
         }, 1L, 1L);
     }
 
@@ -335,21 +333,16 @@ public final class NoWebCheck implements Listener {
     }
 
     private boolean isInsideVelocityGrace(UUID id, long now) {
-        Long until = velocityGraceUntilNanos.get(id);
-        if (until == null) return false;
-        if (now <= until) return true;
-        velocityGraceUntilNanos.remove(id, until);
-        return false;
+        long graceMillis = Math.max(0L, Math.min(2_000L,
+                plugin.getConfig().getLong("checks.no-web.velocity-grace-ms", 500L)));
+        return plugin.getPlayerContextManager()
+                .isWithinVelocityGrace(id, now, graceMillis);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onVelocity(PlayerVelocityEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         if (applyingCorrection.contains(id)) return;
-        long graceMillis = Math.max(0L, Math.min(2_000L,
-                plugin.getConfig().getLong("checks.no-web.velocity-grace-ms", 500L)));
-        velocityGraceUntilNanos.put(id,
-                System.nanoTime() + graceMillis * 1_000_000L);
         states.remove(id);
     }
 
@@ -572,7 +565,6 @@ public final class NoWebCheck implements Listener {
         states.remove(id);
         elytraGraceUntilNanos.remove(id);
         pearlGraceUntilNanos.remove(id);
-        velocityGraceUntilNanos.remove(id);
         pearlBaselinePending.remove(id);
         lastPacketLocations.remove(id);
         packetPositions.remove(id);
@@ -582,7 +574,6 @@ public final class NoWebCheck implements Listener {
         states.clear();
         elytraGraceUntilNanos.clear();
         pearlGraceUntilNanos.clear();
-        velocityGraceUntilNanos.clear();
         pearlBaselinePending.clear();
         lastPacketLocations.clear();
         packetPositions.clear();
