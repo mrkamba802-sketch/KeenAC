@@ -97,6 +97,19 @@ public final class PlayerContextManager implements Listener {
         lastTeleportNanos.put(player.getUniqueId(), System.nanoTime());
     }
 
+    /** Returns whether a server velocity event occurred within the supplied grace window. */
+    public boolean isWithinVelocityGrace(UUID playerId, long referenceNanos, long graceMillis) {
+        if (playerId == null || graceMillis <= 0L) return false;
+        Long eventNanos = lastVelocityNanos.get(playerId);
+        if (eventNanos == null || referenceNanos < eventNanos) return false;
+        return referenceNanos - eventNanos <= graceMillis * 1_000_000L;
+    }
+
+    /** Returns the age of the most recent observed teleport, or -1 when unknown. */
+    public long teleportAgeMillis(UUID playerId) {
+        return ageMillis(System.nanoTime(), lastTeleportNanos.get(playerId));
+    }
+
     private long ageMillis(long nowNanos, Long eventNanos) {
         return eventNanos == null ? -1L : Math.max(0L, (nowNanos - eventNanos) / 1_000_000L);
     }
