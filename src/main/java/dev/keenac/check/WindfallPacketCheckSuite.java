@@ -318,31 +318,7 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
                 state.inventoryClicks.clear();
             }
         }
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            Player online = Bukkit.getPlayer(player.getUniqueId());
-            if (online == null || !online.isOnline()) return;
-            InventoryType type = online.getOpenInventory().getTopInventory().getType();
-            if (!isContainer(type)) return;
-            synchronized (state.chestClicks) {
-                state.chestClicks.addLast(now);
-                while (!state.chestClicks.isEmpty()
-                        && now - state.chestClicks.peekFirst() > 500_000_000L) {
-                    state.chestClicks.removeFirst();
-                }
-                state.chestSessionClicks++;
-                if (state.chestClicks.size() > 6) {
-                    state.chestBurstFlags++;
-                    if (state.chestBurstFlags >= 3) {
-                        flag(online, "Chest Stealer", "Repeated container click bursts exceeded six clicks in 500 ms.");
-                        state.chestBurstFlags = 0;
-                    }
-                }
-                if (state.chestSessionClicks > 40) {
-                    flag(online, "Chest Stealer", "Container interaction exceeded 40 clicks during one open session.");
-                    state.chestSessionClicks = 0;
-                }
-            }
-        });
+
     }
 
     private boolean isContainer(InventoryType type) {
