@@ -61,6 +61,10 @@ public final class KeenAC extends JavaPlugin {
         return instance;
     }
 
+    public boolean isRunning() {
+        return isEnabled();
+    }
+
     @Override
     public void onLoad() {
         instance = this;
