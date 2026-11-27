@@ -197,7 +197,7 @@ public final class BaritoneACheck implements Listener {
 
             if (now <= state.lastPacketNanos
                     || now - state.lastPacketNanos > MAX_PACKET_GAP_NANOS) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now);
+                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
                 return;
             }
 
