@@ -7,7 +7,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging.DiggingAction;
+import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -574,7 +574,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private long placeWindowStart;
         private long lastJumpNanos;
         private long lastMoveNanos;
-        private long airborneStartY;
+        private double airborneStartY;
         private double lastPacketX;
         private double lastPacketY;
         private double lastPacketZ;
