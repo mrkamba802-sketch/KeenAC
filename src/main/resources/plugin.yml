@@ -8,7 +8,7 @@ depend: [packetevents]
 commands:
   keenac:
     description: KeenAC administration commands
-    usage: /keenac <alerts|reload>
+    usage: /keenac <alerts|review <player>|reload>
     aliases: [kac]
 permissions:
   keenac.use:
