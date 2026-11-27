@@ -24,6 +24,55 @@ checks:
         enabled: true
       crystal:
         enabled: true
+    movement:
+      air-liquid-break:
+        enabled: true
+      air-liquid-place:
+        enabled: true
+      far-break:
+        enabled: true
+      far-place:
+        enabled: true
+      fast-break:
+        enabled: true
+      ground-spoof:
+        enabled: true
+      illegal-move:
+        enabled: true
+      invalid-break:
+        enabled: true
+      invalid-place:
+        enabled: true
+      invalid-place-cursor:
+        enabled: true
+      multi-break:
+        enabled: true
+      multi-place:
+        enabled: true
+      no-fall:
+        enabled: true
+      no-swing:
+        enabled: true
+      omni-sprint:
+        enabled: true
+      phase:
+        enabled: true
+      position-break:
+        enabled: true
+      position-place:
+        enabled: true
+      rotation-break:
+        enabled: true
+      rotation-place:
+        enabled: true
+      scaffold-support:
+        enabled: true
+      step:
+        enabled: true
+      timer:
+        enabled: true
+      wrong-break:
+        enabled: true
   # Shared server-authoritative correction used by Motion and NoSlow.
   movement-setback:
     enabled: true
