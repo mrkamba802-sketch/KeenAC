@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * state is snapshotted on the primary thread by tick().
  */
 public final class BaritoneACheck implements Listener {
-    private static final long MAX_PACKET_GAP_NANOS = 450_000_000L;
+    private static final long MAX_PACKET_GAP_NANOS = 1_200_000_000L;
     private static final double MAX_PACKET_DISTANCE = 0.85;
     private static final double MIN_MOVEMENT_DISTANCE = 0.025;
 
