@@ -121,6 +121,24 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
             reviewBacktrack(attacker, targetPlayer, state, now);
             reviewHitbox(attacker, targetPlayer, state, now);
         }
+
+        if (enabled("criticals") && !attacker.isOnGround()
+                && !attacker.isInsideVehicle() && !attacker.isGliding()
+                && !attacker.isSwimming() && !attacker.isClimbing()) {
+            double downwardVelocity = -attacker.getVelocity().getY();
+            boolean validFallingMotion = downwardVelocity > 0.11
+                    && downwardVelocity < 0.50 && attacker.getFallDistance() > 0.05F;
+            if (!validFallingMotion && attacker.getVelocity().getY() >= -0.01) {
+                state.invalidCriticalAttacks++;
+                if (state.invalidCriticalAttacks >= 4) {
+                    flag(attacker, "Criticals",
+                            "Repeated airborne attacks lacked the expected falling motion for a vanilla critical hit.");
+                    state.invalidCriticalAttacks = 0;
+                }
+            } else {
+                state.invalidCriticalAttacks = Math.max(0, state.invalidCriticalAttacks - 1);
+            }
+        }
     }
 
     private void handleInteract(Player player, int targetId) {
@@ -372,6 +390,7 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         private int hitboxHits;
         private int badCursorInteractions;
         private int macroRepeats;
+        private int invalidCriticalAttacks;
         private int fastConsumes;
     }
 
