@@ -254,6 +254,12 @@ checks:
     # retain a short best-effort signal for attacks immediately after a click.
     personal-inventory-click-grace-ms: 650
 
+evidence:
+  enabled: true
+  # In-memory history is bounded to protect server memory.
+  max-players: 512
+  max-per-player: 40
+
 alerts:
   enabled: true
   # Real-time minimum delay between alerts for the same player and check.
@@ -275,4 +281,5 @@ commands:
   # Permission nodes are also declared in plugin.yml.
   use-permission: "keenac.use"
   alerts-permission: "keenac.alerts"
-  reload-permission: "keenac.reload"\n  review-permission: "keenac.review"
+  reload-permission: "keenac.reload"
+  review-permission: "keenac.review"
