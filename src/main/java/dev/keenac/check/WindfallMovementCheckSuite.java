@@ -359,7 +359,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         }
 
         if (enabled("air-liquid-break")
-                && (!player.isOnGround() || player.isInWater() || player.isSwimming())) {
+                && (player.getVelocity().getY() < -0.10 || player.isInWater() || player.isSwimming())) {
             state.airBreakSamples++;
             if (state.airBreakSamples >= 3) {
                 flag(player, "Air Liquid Break", "Repeated block-dig actions occurred while airborne or in liquid.");
@@ -467,7 +467,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         }
 
         if (enabled("air-liquid-place")
-                && (!player.isOnGround() || player.isInWater() || player.isSwimming())) {
+                && (player.getVelocity().getY() < -0.10 || player.isInWater() || player.isSwimming())) {
             state.airPlaceSamples++;
             if (state.airPlaceSamples >= 3) {
                 flag(player, "Air Liquid Place", "Repeated block placements occurred while airborne or in liquid.");
@@ -596,6 +596,16 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
 
         boolean recentFirework = state.lastFireworkNanos != 0L
                 && now - state.lastFireworkNanos < 2_500_000_000L;
+        if (state.elytraTicks <= 3 && deltaY > 0.50 && !recentFirework) {
+            state.elytraKickBoostSamples++;
+            if (state.elytraKickBoostSamples >= 2) {
+                flag(player, "Elytra", "An unusually strong upward impulse was observed immediately after gliding began without a recent firework boost.");
+                state.elytraKickBoostSamples = 0;
+            }
+        } else {
+            state.elytraKickBoostSamples = Math.max(0, state.elytraKickBoostSamples - 1);
+        }
+
         if (state.elytraTicks > 5 && deltaY > 0.12 && !recentFirework
                 && horizontalDelta > 0.10) {
             state.elytraAscentSamples++;
@@ -765,6 +775,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private int elytraTicks;
         private int elytraHoverTicks;
         private int elytraAscentSamples;
+        private int elytraKickBoostSamples;
         private long lastFireworkNanos;
         private int gravitySamples;
         private int simulationSamples;
