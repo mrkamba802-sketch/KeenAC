@@ -55,6 +55,12 @@ public final class BaritoneACheck implements Listener {
     private volatile double maximumSegmentDistance = 10.0;
     private volatile double yawTurnToleranceDegrees = 12.0;
     private volatile double maximumAverageYawErrorDegrees = 8.0;
+    private volatile int rotationSnapRequiredCount = 7;
+    private volatile double rotationSnapMinYawDegrees = 12.0;
+    private volatile double rotationSnapMaxYawDegrees = 150.0;
+    private volatile double rotationSnapMaxPitchDegrees = 0.75;
+    private volatile double rotationSnapMaximumAveragePitchDegrees = 0.45;
+    private volatile double rotationSnapMinimumTravelDistance = 4.0;
     private volatile boolean logContext = true;
 
     public BaritoneACheck(KeenAC plugin) {
@@ -123,6 +129,24 @@ public final class BaritoneACheck implements Listener {
         maximumAverageYawErrorDegrees = Math.max(1.0,
                 Math.min(yawTurnToleranceDegrees, plugin.getConfig().getDouble(
                         "checks.baritone-a.maximum-average-yaw-error-degrees", 8.0)));
+        rotationSnapRequiredCount = Math.max(4,
+                Math.min(12, plugin.getConfig().getInt(
+                        "checks.baritone-a.rotation-snap-required-count", 7)));
+        rotationSnapMinYawDegrees = Math.max(6.0,
+                Math.min(45.0, plugin.getConfig().getDouble(
+                        "checks.baritone-a.rotation-snap-min-yaw-degrees", 12.0)));
+        rotationSnapMaxYawDegrees = Math.max(rotationSnapMinYawDegrees + 5.0,
+                Math.min(175.0, plugin.getConfig().getDouble(
+                        "checks.baritone-a.rotation-snap-max-yaw-degrees", 150.0)));
+        rotationSnapMaxPitchDegrees = Math.max(0.1,
+                Math.min(5.0, plugin.getConfig().getDouble(
+                        "checks.baritone-a.rotation-snap-max-pitch-degrees", 0.75)));
+        rotationSnapMaximumAveragePitchDegrees = Math.max(0.05,
+                Math.min(rotationSnapMaxPitchDegrees, plugin.getConfig().getDouble(
+                        "checks.baritone-a.rotation-snap-max-average-pitch-degrees", 0.45)));
+        rotationSnapMinimumTravelDistance = Math.max(1.0,
+                Math.min(20.0, plugin.getConfig().getDouble(
+                        "checks.baritone-a.rotation-snap-min-travel-distance", 4.0)));
         logContext = plugin.getConfig().getBoolean("checks.baritone-a.log-context", true);
     }
 
@@ -150,27 +174,22 @@ public final class BaritoneACheck implements Listener {
      * PacketEvents entry point. Can receive both position-only and
      * rotation-only movement updates so turn correlation is not lost.
      */
-    public void recordRotation(UUID id, float yaw) {
-        if (!enabled || id == null || !Float.isFinite(yaw)) return;
+    public void recordRotation(UUID id, float yaw, float pitch) {
+        if (!enabled || id == null || !Float.isFinite(yaw) || !Float.isFinite(pitch)) return;
         PacketProfile profile = profiles.get(id);
         PacketState state = states.get(id);
         if (profile == null || !profile.eligible() || state == null) return;
+        long now = System.nanoTime();
         synchronized (state) {
-            if (!state.hasYaw) {
-                state.lastYaw = yaw;
-                state.hasYaw = true;
-            } else {
-                state.accumulatedYawChange += BaritoneASteeringAnalyzer.wrapDegrees(
-                        yaw - state.lastYaw);
-                state.lastYaw = yaw;
-            }
+            observeRotation(state, yaw, pitch, now);
+            pruneRotationHistory(state, now);
         }
     }
 
-    public void recordMovement(UUID id, double x, double z, float yaw,
+    public void recordMovement(UUID id, double x, double z, float yaw, float pitch,
                                boolean rotationChanged, boolean onGround) {
         if (!enabled || id == null || !Double.isFinite(x) || !Double.isFinite(z)
-                || !Float.isFinite(yaw)) {
+                || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
             return;
         }
 
@@ -183,21 +202,25 @@ public final class BaritoneACheck implements Listener {
 
         long now = System.nanoTime();
         PacketState state = states.computeIfAbsent(id,
-                ignored -> new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns));
+                ignored -> new PacketState(profile.worldId(), x, z, yaw, pitch,
+                        rotationChanged, now, requiredTurns, rotationSnapRequiredCount));
 
         boolean shouldAlert = false;
         int violationLevel = 0;
-        int observedTurns = 0;
+        String alertReason = null;
+        String signalSummary = null;
 
         synchronized (state) {
             if (!state.worldId.equals(profile.worldId())) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
+                state.reset(profile.worldId(), x, z, yaw, pitch, rotationChanged,
+                        now, requiredTurns, rotationSnapRequiredCount);
                 return;
             }
 
             if (now <= state.lastPacketNanos
                     || now - state.lastPacketNanos > MAX_PACKET_GAP_NANOS) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
+                state.reset(profile.worldId(), x, z, yaw, pitch, rotationChanged,
+                        now, requiredTurns, rotationSnapRequiredCount);
                 return;
             }
 
@@ -205,79 +228,100 @@ public final class BaritoneACheck implements Listener {
             double dz = z - state.lastZ;
             double distance = Math.hypot(dx, dz);
             if (distance > MAX_PACKET_DISTANCE) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
+                state.reset(profile.worldId(), x, z, yaw, pitch, rotationChanged,
+                        now, requiredTurns, rotationSnapRequiredCount);
                 return;
             }
 
             if (rotationChanged) {
-                if (state.hasYaw) {
-                    state.accumulatedYawChange += BaritoneASteeringAnalyzer.wrapDegrees(
-                            yaw - state.lastYaw);
-                }
-                state.lastYaw = yaw;
-                state.hasYaw = true;
+                observeRotation(state, yaw, pitch, now);
             }
 
             state.lastPacketNanos = now;
             state.lastX = x;
             state.lastZ = z;
-            if (distance < MIN_MOVEMENT_DISTANCE) {
-                return;
+            if (distance >= MIN_MOVEMENT_DISTANCE) {
+                state.travelSamples.addLast(new TravelSample(distance, now));
             }
+            pruneRotationHistory(state, now);
 
-            double direction = Math.toDegrees(Math.atan2(-dx, dz));
-            if (!state.hasDirection) {
-                state.lastDirection = direction;
-                state.hasDirection = true;
-                state.segmentDistance += distance;
-                return;
-            }
+            double recentTravel = recentTravelDistance(state);
+            List<BaritoneARotationAnalyzer.RotationSnap> recentSnaps =
+                    new ArrayList<>(state.rotationSnaps);
+            boolean snapDensity = BaritoneARotationAnalyzer.hasSnapDensity(
+                    recentSnaps, rotationSnapRequiredCount,
+                    rotationSnapMaximumAveragePitchDegrees,
+                    recentTravel, rotationSnapMinimumTravelDistance);
 
-            double turn = BaritoneASteeringAnalyzer.wrapDegrees(
-                    direction - state.lastDirection);
-            if (Math.abs(turn) >= minimumTurnDegrees) {
-                double segmentDistance = state.segmentDistance;
-                double yawTurn = state.accumulatedYawChange;
-                boolean matched = BaritoneASteeringAnalyzer.matchesTurn(
-                        turn, yawTurn, segmentDistance,
-                        minimumTurnDegrees, maximumTurnDegrees,
-                        minimumSegmentDistance, maximumSegmentDistance,
-                        yawTurnToleranceDegrees);
-
-                if (matched) {
-                    state.turns.addLast(new BaritoneASteeringAnalyzer.TurnSample(
-                            turn, yawTurn, segmentDistance, now));
-                    pruneOldTurns(state, now);
-
-                    List<BaritoneASteeringAnalyzer.TurnSample> recent =
-                            new ArrayList<>(state.turns);
-                    boolean consistent = BaritoneASteeringAnalyzer.hasConsistentSteering(
-                            recent, requiredTurns, maximumAverageYawErrorDegrees);
-                    if (consistent && state.turns.size() >= state.nextAlertAtTurns) {
-                        if (state.violationLevel < Integer.MAX_VALUE) {
-                            state.violationLevel++;
-                        }
-                        violationLevel = state.violationLevel;
-                        observedTurns = state.turns.size();
-                        state.nextAlertAtTurns = state.turns.size() + alertStep;
-                        shouldAlert = true;
-                    }
-                } else {
-                    // A non-correlated turn breaks a candidate steering run.
-                    state.turns.clear();
-                    state.nextAlertAtTurns = requiredTurns;
+            if (snapDensity && state.rotationSnaps.size() >= state.nextAlertAtSnaps) {
+                if (state.violationLevel < Integer.MAX_VALUE) {
+                    state.violationLevel++;
                 }
-
-                state.segmentDistance = 0.0;
-                state.accumulatedYawChange = 0.0;
-                state.lastDirection = direction;
+                violationLevel = state.violationLevel;
+                state.nextAlertAtSnaps = state.rotationSnaps.size() + alertStep;
+                shouldAlert = true;
+                alertReason = "Repeated horizontal rotation snaps with very small pitch changes occurred during sustained ground movement.";
+                signalSummary = "rotation snaps=" + state.rotationSnaps.size()
+                        + ", travelled=" + String.format(java.util.Locale.ROOT, "%.2f", recentTravel)
+                        + " blocks";
             }
-            state.segmentDistance += distance;
+
+            if (distance >= MIN_MOVEMENT_DISTANCE) {
+                double direction = Math.toDegrees(Math.atan2(-dx, dz));
+                if (!state.hasDirection) {
+                    state.lastDirection = direction;
+                    state.hasDirection = true;
+                    state.segmentDistance += distance;
+                } else {
+                    double turn = BaritoneASteeringAnalyzer.wrapDegrees(
+                            direction - state.lastDirection);
+                    if (Math.abs(turn) >= minimumTurnDegrees) {
+                        double segmentDistance = state.segmentDistance;
+                        double yawTurn = state.accumulatedYawChange;
+                        boolean matched = BaritoneASteeringAnalyzer.matchesTurn(
+                                turn, yawTurn, segmentDistance,
+                                minimumTurnDegrees, maximumTurnDegrees,
+                                minimumSegmentDistance, maximumSegmentDistance,
+                                yawTurnToleranceDegrees);
+
+                        if (matched) {
+                            state.turns.addLast(new BaritoneASteeringAnalyzer.TurnSample(
+                                    turn, yawTurn, segmentDistance, now));
+                            pruneOldTurns(state, now);
+
+                            List<BaritoneASteeringAnalyzer.TurnSample> recentTurns =
+                                    new ArrayList<>(state.turns);
+                            boolean consistent = BaritoneASteeringAnalyzer.hasConsistentSteering(
+                                    recentTurns, requiredTurns, maximumAverageYawErrorDegrees);
+                            if (!shouldAlert && consistent
+                                    && state.turns.size() >= state.nextAlertAtTurns) {
+                                if (state.violationLevel < Integer.MAX_VALUE) {
+                                    state.violationLevel++;
+                                }
+                                violationLevel = state.violationLevel;
+                                state.nextAlertAtTurns = state.turns.size() + alertStep;
+                                shouldAlert = true;
+                                alertReason = "Repeated ground-navigation turns showed unusually precise camera-to-travel steering.";
+                                signalSummary = "matched steering turns=" + state.turns.size();
+                            }
+                        } else {
+                            state.turns.clear();
+                            state.nextAlertAtTurns = requiredTurns;
+                        }
+
+                        state.segmentDistance = 0.0;
+                        state.accumulatedYawChange = 0.0;
+                        state.lastDirection = direction;
+                    }
+                    state.segmentDistance += distance;
+                }
+            }
         }
 
         if (shouldAlert) {
             final int vl = violationLevel;
-            final int turnCount = observedTurns;
+            final String reason = alertReason;
+            final String summary = signalSummary;
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Player player = Bukkit.getPlayer(id);
                 if (player == null || !player.isOnline()
@@ -285,15 +329,61 @@ public final class BaritoneACheck implements Listener {
                         || plugin.getAlertManager() == null) {
                     return;
                 }
-                plugin.getAlertManager().send("Baritone (A)", player, vl,
-                        "Repeated ground-navigation turns showed unusually precise camera-to-travel steering.");
+                plugin.getAlertManager().send("Baritone (A)", player, vl, reason);
                 if (logContext) {
                     plugin.getLogger().warning(String.format(java.util.Locale.ROOT,
-                            "Baritone (A) review for %s (VL=%d, matched turns=%d, ping=%dms)",
-                            player.getName(), vl, turnCount, player.getPing()));
+                            "Baritone (A) review for %s (VL=%d, %s, ping=%dms)",
+                            player.getName(), vl, summary, player.getPing()));
                 }
             });
         }
+    }
+
+    private void observeRotation(PacketState state, float yaw, float pitch, long now) {
+        if (!state.hasYaw) {
+            state.lastYaw = yaw;
+            state.lastPitch = pitch;
+            state.hasYaw = true;
+            return;
+        }
+
+        double yawDelta = BaritoneASteeringAnalyzer.wrapDegrees(yaw - state.lastYaw);
+        double pitchDelta = pitch - state.lastPitch;
+        state.accumulatedYawChange += yawDelta;
+        if (BaritoneARotationAnalyzer.isRotationSnap(
+                yawDelta, pitchDelta,
+                rotationSnapMinYawDegrees, rotationSnapMaxYawDegrees,
+                rotationSnapMaxPitchDegrees)) {
+            state.rotationSnaps.addLast(
+                    new BaritoneARotationAnalyzer.RotationSnap(yawDelta, pitchDelta, now));
+        }
+        state.lastYaw = yaw;
+        state.lastPitch = pitch;
+    }
+
+    private void pruneRotationHistory(PacketState state, long now) {
+        while (!state.rotationSnaps.isEmpty()
+                && now - state.rotationSnaps.peekFirst().timestampNanos() > observationWindowNanos) {
+            state.rotationSnaps.removeFirst();
+        }
+        while (!state.travelSamples.isEmpty()
+                && now - state.travelSamples.peekFirst().timestampNanos() > observationWindowNanos) {
+            state.travelSamples.removeFirst();
+        }
+        while (state.rotationSnaps.size() > 40) {
+            state.rotationSnaps.removeFirst();
+        }
+        while (state.travelSamples.size() > 512) {
+            state.travelSamples.removeFirst();
+        }
+    }
+
+    private double recentTravelDistance(PacketState state) {
+        double total = 0.0;
+        for (TravelSample sample : state.travelSamples) {
+            total += sample.distance();
+        }
+        return total;
     }
 
     private void pruneOldTurns(PacketState state, long now) {
@@ -354,40 +444,52 @@ public final class BaritoneACheck implements Listener {
     }
 
     private record PacketProfile(boolean eligible, UUID worldId, int ping) { }
+    private record TravelSample(double distance, long timestampNanos) { }
 
     private static final class PacketState {
         private UUID worldId;
         private final Deque<BaritoneASteeringAnalyzer.TurnSample> turns = new ArrayDeque<>();
+        private final Deque<BaritoneARotationAnalyzer.RotationSnap> rotationSnaps = new ArrayDeque<>();
+        private final Deque<TravelSample> travelSamples = new ArrayDeque<>();
         private double lastX;
         private double lastZ;
         private double lastYaw;
+        private double lastPitch;
         private double lastDirection;
         private double accumulatedYawChange;
         private double segmentDistance;
         private long lastPacketNanos;
         private int violationLevel;
         private int nextAlertAtTurns;
+        private int nextAlertAtSnaps;
         private boolean hasYaw;
         private boolean hasDirection;
 
-        private PacketState(UUID worldId, double x, double z, float yaw,
-                            boolean rotationChanged, long now, int initialRequiredTurns) {
-            reset(worldId, x, z, yaw, rotationChanged, now, initialRequiredTurns);
+        private PacketState(UUID worldId, double x, double z, float yaw, float pitch,
+                            boolean rotationChanged, long now, int initialRequiredTurns,
+                            int initialRequiredSnaps) {
+            reset(worldId, x, z, yaw, pitch, rotationChanged, now,
+                    initialRequiredTurns, initialRequiredSnaps);
         }
 
-        private void reset(UUID worldId, double x, double z, float yaw,
-                           boolean rotationChanged, long now, int initialRequiredTurns) {
+        private void reset(UUID worldId, double x, double z, float yaw, float pitch,
+                           boolean rotationChanged, long now, int initialRequiredTurns,
+                           int initialRequiredSnaps) {
             this.worldId = worldId;
             lastX = x;
             lastZ = z;
             lastYaw = yaw;
+            lastPitch = pitch;
             lastDirection = 0.0;
             accumulatedYawChange = 0.0;
             segmentDistance = 0.0;
             lastPacketNanos = now;
             turns.clear();
+            rotationSnaps.clear();
+            travelSamples.clear();
             violationLevel = 0;
             nextAlertAtTurns = initialRequiredTurns;
+            nextAlertAtSnaps = initialRequiredSnaps;
             hasYaw = rotationChanged;
             hasDirection = false;
         }
