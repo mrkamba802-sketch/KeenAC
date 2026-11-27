@@ -1,0 +1,118 @@
+package dev.keenac.engine.core.check.impl.movement;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
+import dev.keenac.engine.core.check.Check;
+import dev.keenac.engine.core.check.CheckData;
+import dev.keenac.engine.core.check.CompatFlag;
+import dev.keenac.engine.core.check.type.PacketCheck;
+import dev.keenac.engine.core.player.TrackedPlayer;
+import dev.keenac.engine.core.util.PacketClock;
+import java.util.ArrayDeque;
+import java.util.Iterator;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+@CheckData(name = "Timer A", stableKey = "keenac.movement.timer", decay = 0.005, setbackVl = 25, compat = {CompatFlag.RELAX_ON_MISMATCH}, relaxMultiplier = 1.2)
+public class TimerCheck extends Check implements PacketCheck {
+    private static final int NORMAL_PACKETS_PER_TICK_MIN = 1;
+    private static final int NORMAL_PACKETS_PER_TICK_MAX = 3;
+    private static final int LATENCY_JITTER_TOLERANCE = 2;
+    private static final long WINDOW_DURATION_MS = 1000;
+    private static final long WINDOW_TICK_COUNT = 20;
+    private static final double SPEEDHACK_MULTIPLIER = 1.2;
+    private static final double SLOWHACK_MULTIPLIER = 0.5;
+    private static final double FLAG_THRESHOLD_MULTIPLIER = 1.5;
+    private static final long DOUBLE_BUFFER_INTERVAL_MS = 500;
+    private static final class PlayerState {
+        ArrayDeque<Long> packetTimestamps = new ArrayDeque<>();
+        ArrayDeque<Long> secondaryPacketTimestamps = new ArrayDeque<>();
+        long lastSecondaryFlush = PacketClock.currentTimeMillis();
+        int consecutiveHighWindows;
+        int consecutiveLowWindows;
+    }
+    private final ConcurrentHashMap<UUID, PlayerState> stateMap = new ConcurrentHashMap<>();
+    private PlayerState getState(TrackedPlayer player) {
+        return stateMap.computeIfAbsent(player.getUuid(), k -> new PlayerState());
+    }
+    @Override
+    public void removePlayer(UUID uuid) {
+        stateMap.remove(uuid);
+    }
+    @Override
+    public void onPacketReceive(TrackedPlayer player, PacketReceiveEvent event) {
+        if (!isMovementPacket(event)) return;
+        PlayerState state = getState(player);
+        long now = PacketClock.currentTimeMillis();
+        state.packetTimestamps.addLast(now);
+        state.secondaryPacketTimestamps.addLast(now);
+        cleanWindow(state.packetTimestamps, now);
+        cleanWindow(state.secondaryPacketTimestamps, now);
+        double packetsPerTick = state.packetTimestamps.size() / (double) WINDOW_TICK_COUNT;
+        int jitterTolerance = Math.max(LATENCY_JITTER_TOLERANCE,
+                (int) Math.ceil(player.getTransactionPing() / 50.0));
+        int maxNormalPerTick = NORMAL_PACKETS_PER_TICK_MAX + jitterTolerance;
+        double speedHackThreshold = maxNormalPerTick * SPEEDHACK_MULTIPLIER;
+        double slowHackThreshold = Math.max(0.2, NORMAL_PACKETS_PER_TICK_MIN * SLOWHACK_MULTIPLIER);
+        if (packetsPerTick > speedHackThreshold) {
+            if (packetsPerTick > speedHackThreshold * FLAG_THRESHOLD_MULTIPLIER) {
+                state.consecutiveHighWindows++;
+            } else {
+                state.consecutiveHighWindows = Math.max(0, state.consecutiveHighWindows - 1);
+            }
+            if (state.consecutiveHighWindows >= 2) {
+                increaseBuffer(player, 1.0);
+                if (getBuffer(player) > 3.0) {
+                    flag(player);
+                    resetBuffer(player);
+                    state.consecutiveHighWindows = 0;
+                }
+            }
+        } else if (packetsPerTick < slowHackThreshold) {
+            state.consecutiveLowWindows++;
+            if (state.consecutiveLowWindows >= 4) {
+                increaseBuffer(player, 0.8);
+                if (getBuffer(player) > 4.0) {
+                    flag(player);
+                    resetBuffer(player);
+                    state.consecutiveLowWindows = 0;
+                }
+            }
+        } else {
+            state.consecutiveHighWindows = Math.max(0, state.consecutiveHighWindows - 1);
+            state.consecutiveLowWindows = Math.max(0, state.consecutiveLowWindows - 1);
+            decreaseBuffer(player, 0.1);
+        }
+        if (now - state.lastSecondaryFlush >= DOUBLE_BUFFER_INTERVAL_MS) {
+            long secondaryCount = state.secondaryPacketTimestamps.stream()
+                    .filter(t -> now - t <= DOUBLE_BUFFER_INTERVAL_MS)
+                    .count();
+            double secondaryRate = secondaryCount / (DOUBLE_BUFFER_INTERVAL_MS / 50.0);
+            if (secondaryRate > speedHackThreshold * 1.3) {
+                increaseBuffer(player, 0.5);
+            }
+            state.secondaryPacketTimestamps.clear();
+            state.lastSecondaryFlush = now;
+        }
+    }
+    @Override
+    public void onPacketSend(TrackedPlayer player, PacketSendEvent event) {
+    }
+    private void cleanWindow(ArrayDeque<Long> window, long now) {
+        Iterator<Long> it = window.iterator();
+        while (it.hasNext()) {
+            if (now - it.next() > WINDOW_DURATION_MS) {
+                it.remove();
+            } else {
+                break;
+            }
+        }
+    }
+    private boolean isMovementPacket(PacketReceiveEvent event) {
+        PacketTypeCommon type = event.getPacketType();
+        return type == PacketType.Play.Client.PLAYER_FLYING
+                || type == PacketType.Play.Client.PLAYER_POSITION
+                || type == PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION
+                || type == PacketType.Play.Client.PLAYER_ROTATION;
+    }
+}
