@@ -106,8 +106,12 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
 
             PlayerContextSnapshot context = record.context();
             if (context == null) continue;
-            String state = (context.onGround() ? "ground" : "air")
+            String state = context.gameMode()
+                    + (context.onGround() ? ", ground" : ", air")
+                    + (context.sprinting() ? ", sprinting" : "")
+                    + (context.sneaking() ? ", sneaking" : "")
                     + (context.swimming() ? ", swimming" : "")
+                    + (context.inWater() ? ", water" : "")
                     + (context.flying() ? ", flying" : "")
                     + (context.gliding() ? ", gliding" : "")
                     + (context.inVehicle() ? ", vehicle" : "");
