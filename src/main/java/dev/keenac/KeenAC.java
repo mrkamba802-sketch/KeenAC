@@ -233,6 +233,9 @@ public final class KeenAC extends JavaPlugin {
             if (silentSwapPacketListener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(silentSwapPacketListener);
             }
+            if (windfallCombatCheckSuite != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(windfallCombatCheckSuite);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (auraCheck != null) auraCheck.clearAll();
