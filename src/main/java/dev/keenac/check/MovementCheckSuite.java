@@ -217,7 +217,7 @@ public final class MovementCheckSuite extends PacketListenerAbstract implements 
 
         if (interval > CheckSettings.millisNanos(plugin, "movement.gravity", "stale-sample-interval-ms", 250L)) {
             state.previousVerticalDelta = deltaY;
-            state.previousPhysicsTicks = Math.max(1, Math.min(4,
+            state.previousPhysicsTicks = Math.max(1, Math.min(CheckSettings.integer(plugin, "movement.gravity", "max-step-ticks", 4),
                     (int) Math.round(interval / 50_000_000.0)));
             state.gravitySamples = 0;
             state.simulationSamples = 0;
@@ -236,7 +236,7 @@ public final class MovementCheckSuite extends PacketListenerAbstract implements 
                 || (context.velocityAgeMs() >= 0L && context.velocityAgeMs() < CheckSettings.longValue(plugin, "movement.gravity", "velocity-grace-ms", 500L))
                 || horizontalDelta < CheckSettings.decimal(plugin, "movement.gravity", "minimum-horizontal-delta", 0.04)) {
             state.previousVerticalDelta = deltaY;
-            state.previousPhysicsTicks = Math.max(1, Math.min(4,
+            state.previousPhysicsTicks = Math.max(1, Math.min(CheckSettings.integer(plugin, "movement.gravity", "max-step-ticks", 4),
                     (int) Math.round(interval / 50_000_000.0)));
             state.gravitySamples = 0;
             state.simulationSamples = 0;
@@ -479,7 +479,7 @@ public final class MovementCheckSuite extends PacketListenerAbstract implements 
             }
 
             if (enabled("rotation-place") && eye.distance(center) < CheckSettings.decimal(plugin, "movement.rotation-place", "max-distance", 5.5)
-                    && angleTo(eye, against.getLocation().add(0.5, 0.5, 0.5)) > CheckSettings.decimal(plugin, "movement.rotation-break", "max-angle-degrees", 72.0)) {
+                    && angleTo(eye, against.getLocation().add(0.5, 0.5, 0.5)) > CheckSettings.decimal(plugin, "movement.rotation-place", "max-angle-degrees", 72.0)) {
                 state.rotationPlaceSamples++;
                 if (state.rotationPlaceSamples >= CheckSettings.integer(plugin, "movement.rotation-place", "confirm-samples", 3)) {
                     flag(player, "Rotation Place", "Repeated block placements were far outside the player's look direction.");
@@ -501,7 +501,7 @@ public final class MovementCheckSuite extends PacketListenerAbstract implements 
         }
 
         if (enabled("air-liquid-place")
-                && (player.getVelocity().getY() < -CheckSettings.decimal(plugin, "movement.air-liquid-break", "falling-velocity", 0.10) || player.isInWater() || player.isSwimming())) {
+                && (player.getVelocity().getY() < -CheckSettings.decimal(plugin, "movement.air-liquid-place", "falling-velocity", 0.10) || player.isInWater() || player.isSwimming())) {
             state.airPlaceSamples++;
             if (state.airPlaceSamples >= CheckSettings.integer(plugin, "movement.air-liquid-place", "confirm-samples", 3)) {
                 flag(player, "Air Liquid Place", "Repeated block placements occurred while airborne or in liquid.");
