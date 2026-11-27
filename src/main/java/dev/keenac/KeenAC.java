@@ -24,6 +24,7 @@ import dev.keenac.check.ScaffoldCheck;
 import dev.keenac.check.SilentSwapCheck;
 import dev.keenac.check.WindfallCombatCheckSuite;
 import dev.keenac.check.WindfallMovementCheckSuite;
+import dev.keenac.check.WindfallPacketCheckSuite;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -62,6 +63,7 @@ public final class KeenAC extends JavaPlugin {
     private ScaffoldCheck scaffoldCheck;
     private WindfallCombatCheckSuite windfallCombatCheckSuite;
     private WindfallMovementCheckSuite windfallMovementCheckSuite;
+    private WindfallPacketCheckSuite windfallPacketCheckSuite;
     private AlertManager alertManager;
     private PlayerContextManager playerContextManager;
     private EvidenceManager evidenceManager;
@@ -114,6 +116,7 @@ public final class KeenAC extends JavaPlugin {
         scaffoldCheck = new ScaffoldCheck(this);
         windfallCombatCheckSuite = new WindfallCombatCheckSuite(this);
         windfallMovementCheckSuite = new WindfallMovementCheckSuite(this);
+        windfallPacketCheckSuite = new WindfallPacketCheckSuite(this);
         auraPacketListener = new PacketAuraListener(auraCheck);
         gameplayPacketListener = new PacketGameplayListener(
                 this, noSlowCheck, noWebCheck, scaffoldCheck, wallHitCheck);
@@ -137,6 +140,7 @@ public final class KeenAC extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(silentSwapPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(windfallCombatCheckSuite);
         PacketEvents.getAPI().getEventManager().registerListener(windfallMovementCheckSuite);
+        PacketEvents.getAPI().getEventManager().registerListener(windfallPacketCheckSuite);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(ghostMenuCheck, this);
@@ -156,6 +160,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(noWebCheck, this);
         Bukkit.getPluginManager().registerEvents(windfallCombatCheckSuite, this);
         Bukkit.getPluginManager().registerEvents(windfallMovementCheckSuite, this);
+        Bukkit.getPluginManager().registerEvents(windfallPacketCheckSuite, this);
 
         KeenACCommand executor = new KeenACCommand(this);
         getCommand("keenac").setExecutor(executor);
@@ -244,6 +249,9 @@ public final class KeenAC extends JavaPlugin {
             if (windfallMovementCheckSuite != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(windfallMovementCheckSuite);
             }
+            if (windfallPacketCheckSuite != null) {
+                PacketEvents.getAPI().getEventManager().unregisterListener(windfallPacketCheckSuite);
+            }
         }
         if (airStuckCheck != null) airStuckCheck.clearAll();
         if (auraCheck != null) auraCheck.clearAll();
@@ -264,6 +272,7 @@ public final class KeenAC extends JavaPlugin {
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
         if (windfallCombatCheckSuite != null) windfallCombatCheckSuite.clearAll();
         if (windfallMovementCheckSuite != null) windfallMovementCheckSuite.clearAll();
+        if (windfallPacketCheckSuite != null) windfallPacketCheckSuite.clearAll();
         if (alertManager != null) alertManager.clearAll();
         if (evidenceManager != null) evidenceManager.clearAll();
         if (playerContextManager != null) playerContextManager.clearAll();
