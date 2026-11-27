@@ -209,6 +209,24 @@ checks:
     # Advisory only: Baritone is not directly identifiable from movement packets.
     # This check alerts on repeated automated-looking ground-navigation patterns.
     log-context: true
+  baritone-a:
+    enabled: true
+    # Separate Baritone (A) review: repeated precise camera-to-travel steering.
+    max-ping-ms: 220
+    observation-window-ms: 25000
+    velocity-grace-ms: 1200
+    # Requires multiple independent direction changes with closely correlated yaw.
+    required-turns: 8
+    # Additional matched turns required before the next escalation.
+    alert-step: 4
+    minimum-turn-degrees: 18.0
+    maximum-turn-degrees: 150.0
+    minimum-segment-distance: 0.65
+    maximum-segment-distance: 10.0
+    yaw-turn-tolerance-degrees: 12.0
+    maximum-average-yaw-error-degrees: 8.0
+    # Advisory only: this is a movement-pattern signal, not proof of a named client.
+    log-context: true
 
   scaffold:
     enabled: true
