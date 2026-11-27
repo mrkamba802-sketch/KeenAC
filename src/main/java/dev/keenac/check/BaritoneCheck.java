@@ -149,6 +149,21 @@ public final class BaritoneCheck implements Listener {
      * PacketEvents callback. No Bukkit API is used here. The detector needs a
      * sequence of position-bearing, on-ground packets and optional yaw changes.
      */
+    public void recordRotation(UUID id, float yaw) {
+        if (!enabled || id == null || !Float.isFinite(yaw)) return;
+        PacketState state = states.get(id);
+        if (state == null) return;
+        synchronized (state) {
+            if (!state.hasYaw) {
+                state.lastYaw = yaw;
+                state.hasYaw = true;
+            } else {
+                state.accumulatedYawChange += wrapDegrees(yaw - state.lastYaw);
+                state.lastYaw = yaw;
+            }
+        }
+    }
+
     public void recordMovement(UUID id, double x, double z, float yaw,
                                boolean rotationChanged, boolean onGround) {
         if (!enabled) {
