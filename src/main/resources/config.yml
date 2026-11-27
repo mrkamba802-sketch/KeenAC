@@ -2,6 +2,28 @@
 # All distances are measured in blocks; time values are in seconds or server ticks as noted.
 
 checks:
+  # Adapted Windfall combat signals. All checks are advisory and use KeenAC's
+  # shared AlertManager/EvidenceManager; no standalone punishment is applied.
+  windfall:
+    combat:
+      autoclicker:
+        enabled: true
+      backtrack:
+        enabled: true
+      hitboxes:
+        enabled: true
+      multi-interact:
+        enabled: true
+      self-interact:
+        enabled: true
+      interact-cursor:
+        enabled: true
+      macro:
+        enabled: true
+      fast-heal:
+        enabled: true
+      crystal:
+        enabled: true
   # Shared server-authoritative correction used by Motion and NoSlow.
   movement-setback:
     enabled: true
