@@ -205,7 +205,7 @@ public final class BaritoneACheck implements Listener {
             double dz = z - state.lastZ;
             double distance = Math.hypot(dx, dz);
             if (distance > MAX_PACKET_DISTANCE) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now);
+                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
                 return;
             }
 
