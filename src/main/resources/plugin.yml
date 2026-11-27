@@ -3,8 +3,7 @@ version: '${version}'
 main: dev.keenac.KeenAC
 api-version: '1.21'
 authors: [MrKamba, Its_Ronex]
-description: KeenAC movement diagnostics and checks powered by PacketEvents.
-depend: [packetevents]
+description: KeenAC alerts, evidence history and player context core.
 commands:
   keenac:
     description: KeenAC administration commands
