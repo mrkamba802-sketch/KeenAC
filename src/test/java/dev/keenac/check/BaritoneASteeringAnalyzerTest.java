@@ -11,7 +11,7 @@ class BaritoneASteeringAnalyzerTest {
     @Test
     void acceptsDirectionAndYawTurnAcrossAngleWrapBoundary() {
         assertTrue(BaritoneASteeringAnalyzer.matchesTurn(
-                -179.0, 179.0, 1.5,
+                20.0, 378.0, 1.5,
                 18.0, 150.0, 0.6, 10.0, 5.0));
     }
 
