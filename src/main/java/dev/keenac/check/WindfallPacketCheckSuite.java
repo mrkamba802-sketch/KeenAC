@@ -268,6 +268,9 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
         if (!"minecraft:brand".equals(channel) && !"MC|Brand".equals(channel)) return;
         byte[] raw = message.getData();
         if (raw == null || raw.length == 0) return;
+        if (enabled("crash") && raw.length > 32767) {
+            flag(player, "Crash", "Plugin-message payload exceeded the conservative 32 KiB review limit.");
+        }
         String brand = new String(raw, StandardCharsets.UTF_8)
                 .toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
         for (String token : REVIEW_BRANDS) {
@@ -456,6 +459,7 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
     }
 
     private void sendTransactionProbes() {
+        if (!enabled("transaction") || !plugin.isEnabled()) return;
         long now = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             PacketState state = states.computeIfAbsent(player.getUniqueId(), ignored -> new PacketState());
@@ -495,6 +499,7 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
     }
 
     private void handleTransactionPong(Player player, PacketState state, int id, long now) {
+        if (!enabled("transaction")) return;
         Long sentAt = state.pendingPings.remove(id);
         if (sentAt != null) return;
         if ((id & 0xFFFFFF00) != 0x4B454E00) return;
@@ -530,7 +535,7 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
         private final Deque<Long> skippedTransactions = new ArrayDeque<>();
         private final Deque<Long> unknownTransactions = new ArrayDeque<>();
         private final Map<Integer, Long> pendingPings = new ConcurrentHashMap<>();
-        private final Map<String, Integer> violationLevels = new HashMap<>();
+        private final Map<String, Integer> violationLevels = new ConcurrentHashMap<>();
 
         private long creativeWindowStart;
         private long steerWindowStart;
