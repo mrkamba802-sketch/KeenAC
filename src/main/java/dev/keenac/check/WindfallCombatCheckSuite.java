@@ -395,7 +395,11 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
     }
 
     private boolean enabled(String check) {
-        return plugin.getConfig().getBoolean("checks.windfall.combat." + check + ".enabled", true);
+        // Windfall Fast Heal A is explicitly protocol-gated to legacy 1.6–1.8
+        // clients (protocol 5–107), so it must not run by default on 1.21.4.
+        boolean defaultEnabled = !"fast-heal".equals(check);
+        return plugin.getConfig().getBoolean(
+                "checks.windfall.combat." + check + ".enabled", defaultEnabled);
     }
 
     private void flag(Player player, String check, String reason) {
