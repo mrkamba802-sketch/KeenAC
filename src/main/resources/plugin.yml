@@ -20,3 +20,6 @@ permissions:
   keenac.reload:
     description: Allows reloading KeenAC configuration.
     default: op
+  keenac.review:
+    description: Allows reviewing recent KeenAC evidence.
+    default: op
