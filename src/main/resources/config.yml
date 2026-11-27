@@ -26,6 +26,8 @@ checks:
         enabled: true
       criticals:
         enabled: true
+      kill-aura:
+        enabled: true
       sword-block:
         # Legacy sword blocking (1.7-1.8) is not part of modern 1.21 combat.
         enabled: false
