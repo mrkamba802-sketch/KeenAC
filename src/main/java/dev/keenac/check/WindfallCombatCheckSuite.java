@@ -15,7 +15,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -305,22 +304,6 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
             }
         } else {
             state.fastConsumes = Math.max(0, state.fastConsumes - 1);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onEntityInteract(PlayerInteractEntityEvent event) {
-        if (!enabled("interact-cursor")) return;
-        Player player = event.getPlayer();
-        Entity target = event.getRightClicked();
-        if (target == player) return;
-        if (!isLookingAt(player, target, 4.5)) {
-            CombatState state = state(player);
-            state.badCursorInteractions++;
-            if (state.badCursorInteractions >= 3) {
-                flag(player, "Interact Cursor", "Repeated Bukkit entity interactions were not aligned with the look ray.");
-                state.badCursorInteractions = 0;
-            }
         }
     }
 
