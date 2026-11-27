@@ -16,7 +16,7 @@ AirStuck detection for Paper and Purpur powered by PacketEvents.
 
 ## Build
 
-Run `gradle build` with JDK 21. The plugin JAR is written to `build/libs/KeenAC-1.1.0.jar`.
+Run `gradle test` to execute the regression tests, or `gradle build` with JDK 21 to run tests and build the plugin. The plugin JAR is written to `build/libs/KeenAC-1.2.2.jar`.
 
 GitHub Actions builds the JAR on each push and publishes it as a workflow artifact.
 
@@ -26,16 +26,24 @@ AirStuck position samples are decoded from incoming client movement packets thro
 
 Detection resets on movement, landing, teleportation, world changes, and exempt movement states. A suspected player has common gameplay interactions cancelled until the suspicion clears.
 
-Alerts use `&bKeenAC &8» &f<player> &7failed &eAirStuck &8(VL: <level>)`, rate-limited to one per player every 3 seconds.
+Alerts use the configured format and a shared real-time cooldown per player and check. The default format displays the escalation as `x1`, `x2`, `x3`, and so on.
 
 Operators are not exempt from checks. The `keenac.alerts` permission controls who receives alerts; it does not bypass detection.
 
 
+## Evidence and staff review
+
+Every check signal is recorded with the check name, violation level, reason, and a shared player-context snapshot (ping, TPS, world/position, velocity, movement state, active potion effects, and the age of the last observed teleport and velocity event). The bounded in-memory history is configured under `evidence`; defaults are 512 tracked players and 40 records per player. History is not persisted across server restarts. Set `evidence.enabled: false` to disable recording.
+
+Staff with `keenac.review` can inspect the latest records using `/keenac review <player>`. The permission defaults to operators and can be changed with `commands.review-permission`. Alert notifications can be disabled independently; evidence recording remains active while the plugin is enabled.
+
+The `checks.no-slow.potion-effects` option controls whether potion-driven movement attribute changes and Dolphin's Grace are included in the NoSlow movement allowance. When disabled, the check uses the base movement attribute and does not apply the Dolphin's Grace bonus.
+
 ## Motion diagnostics
 
 The Motion module exposes `KeenAC#getMotionCheck().recordSuspicion(player, reason)`
-for trusted movement-analysis components to submit diagnostic signals. Three
-signals inside the configured rolling window start a staff review; further
+for trusted movement-analysis components to submit diagnostic signals. Five
+signals by default inside the configured rolling window start a staff review; further
 signals refresh the review window. Console diagnostics include active potion
 effects, the effective movement-speed attribute, walk/fly speed settings,
 recent velocity events, and movement states such as flying, gliding, swimming,
