@@ -155,33 +155,34 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         }
 
         if (enabled("crystal")) {
-            Long spawnedAt = state.crystalSpawnTimes.get(targetId);
-            if (spawnedAt != null && now - spawnedAt >= 0L
-                    && now - spawnedAt < 50_000_000L) {
-                flag(attacker, "Crystal", "Attack targeted an end crystal during its spawn tick (entity-id prediction review).");
-            }
+            state.crystalSpawnTimes.entrySet().removeIf(entry ->
+                    now - entry.getValue() > 60_000_000_000L);
 
-            // Fast place-break is evaluated against any attack immediately after
-            // an end-crystal spawn packet, matching Windfall's two-signal model.
-            if (state.lastCrystalSpawnNanos != 0L
-                    && now - state.lastCrystalSpawnNanos >= 0L
-                    && now - state.lastCrystalSpawnNanos < 100_000_000L) {
-                state.crystalFastBreakFlags++;
-                if (state.crystalFastBreakFlags >= 2) {
-                    flag(attacker, "Crystal", "Repeated attacks occurred within 100 ms of an end-crystal spawn.");
-                    state.crystalFastBreakFlags = 0;
+            long sinceSpawn = state.lastCrystalSpawnNanos == 0L
+                    ? Long.MAX_VALUE : (now - state.lastCrystalSpawnNanos) / 1_000_000L;
+            if (sinceSpawn < 100L) {
+                if (sinceSpawn < 40L) {
+                    state.crystalBuffer += 2.0;
+                    if (state.crystalBuffer > 6.0) {
+                        flag(attacker, "Crystal", "Repeated crystal place-to-attack cycles completed in under 40 ms.");
+                        state.crystalBuffer = 3.0;
+                    }
+                } else {
+                    state.crystalBuffer = Math.max(0.0, state.crystalBuffer - 0.25);
                 }
             } else {
-                state.crystalFastBreakFlags = Math.max(0, state.crystalFastBreakFlags - 1);
+                state.crystalBuffer = Math.max(0.0, state.crystalBuffer - 0.1);
             }
-            state.crystalSpawnTimes.entrySet().removeIf(entry ->
-                    now - entry.getValue() > 5_000_000_000L);
-        }
 
-        Entity target = findEntity(attacker, targetId);
-        if (target instanceof Player targetPlayer) {
-            reviewBacktrack(attacker, targetPlayer, state, now);
-            reviewHitbox(attacker, targetPlayer, state, now);
+            Long spawnedAt = state.crystalSpawnTimes.get(targetId);
+            if (spawnedAt != null && now - spawnedAt >= 0L
+                    && (now - spawnedAt) / 50_000_000L <= 0L) {
+                state.crystalBuffer += 1.5;
+                if (state.crystalBuffer > 5.0) {
+                    flag(attacker, "Crystal", "Repeated attacks targeted an end crystal during its spawn tick (entity-id prediction review).");
+                    state.crystalBuffer = 0.0;
+                }
+            }
         }
 
         if (enabled("criticals")) {
@@ -447,7 +448,7 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         private int badCursorInteractions;
         private int macroRepeats;
         private int invalidCriticalAttacks;
-        private int crystalFastBreakFlags;
+        private double crystalBuffer;
         private int auraWindows;
         private int fastConsumes;
     }
