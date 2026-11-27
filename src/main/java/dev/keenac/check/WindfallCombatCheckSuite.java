@@ -81,6 +81,24 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         CombatState state = state(attacker);
         long now = System.nanoTime();
 
+        // KillAura A: detect repeated switching across too many distinct targets
+        // in consecutive one-second windows. AimCheck separately reviews rotation
+        // smoothness and target tracking, avoiding duplicate rotation heuristics here.
+        if (enabled("kill-aura")) {
+            if (state.auraWindowStart == 0L) state.auraWindowStart = now;
+            if (now - state.auraWindowStart > 1_000_000_000L) {
+                if (state.auraTargets.size() > 4) state.auraWindows++;
+                else state.auraWindows = Math.max(0, state.auraWindows - 1);
+                if (state.auraWindows >= 2) {
+                    flag(attacker, "Kill Aura", "Repeated attack windows contained more than four distinct entity targets.");
+                    state.auraWindows = 0;
+                }
+                state.auraTargets.clear();
+                state.auraWindowStart = now;
+            }
+            state.auraTargets.add(targetId);
+        }
+
         // Autoclicker A: stable attack intervals over a sufficiently large sample.
         if (enabled("autoclicker")) {
             if (state.lastAttackNanos != 0L) {
@@ -383,7 +401,9 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         private final Deque<Integer> movementPattern = new ArrayDeque<>();
         private final Map<String, Integer> violationLevels = new HashMap<>();
         private final Set<Integer> attackTargets = new HashSet<>();
+        private final Set<Integer> auraTargets = new HashSet<>();
         private long lastAttackNanos;
+        private long auraWindowStart;
         private long attackWindowStart;
         private long lastConsumeNanos;
         private long lastCrystalPlaceNanos;
@@ -393,6 +413,7 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         private int badCursorInteractions;
         private int macroRepeats;
         private int invalidCriticalAttacks;
+        private int auraWindows;
         private int fastConsumes;
     }
 
