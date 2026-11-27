@@ -22,6 +22,7 @@ import dev.keenac.check.NoWebCheck;
 import dev.keenac.check.ReachCheck;
 import dev.keenac.check.ScaffoldCheck;
 import dev.keenac.check.SilentSwapCheck;
+import dev.keenac.check.WindfallCombatCheckSuite;
 import dev.keenac.command.KeenACCommand;
 import dev.keenac.listener.ActionBlockListener;
 import dev.keenac.listener.PacketAirStuckListener;
@@ -58,6 +59,7 @@ public final class KeenAC extends JavaPlugin {
     private BaritoneCheck baritoneCheck;
     private BaritoneACheck baritoneACheck;
     private ScaffoldCheck scaffoldCheck;
+    private WindfallCombatCheckSuite windfallCombatCheckSuite;
     private AlertManager alertManager;
     private PlayerContextManager playerContextManager;
     private EvidenceManager evidenceManager;
@@ -108,6 +110,7 @@ public final class KeenAC extends JavaPlugin {
         baritoneCheck = new BaritoneCheck(this);
         baritoneACheck = new BaritoneACheck(this);
         scaffoldCheck = new ScaffoldCheck(this);
+        windfallCombatCheckSuite = new WindfallCombatCheckSuite(this);
         auraPacketListener = new PacketAuraListener(auraCheck);
         gameplayPacketListener = new PacketGameplayListener(
                 this, noSlowCheck, noWebCheck, scaffoldCheck, wallHitCheck);
@@ -129,6 +132,7 @@ public final class KeenAC extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(baritonePacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(ghostMenuPacketListener);
         PacketEvents.getAPI().getEventManager().registerListener(silentSwapPacketListener);
+        PacketEvents.getAPI().getEventManager().registerListener(windfallCombatCheckSuite);
 
         Bukkit.getPluginManager().registerEvents(inventoryAutoSwapCheck, this);
         Bukkit.getPluginManager().registerEvents(ghostMenuCheck, this);
@@ -146,6 +150,7 @@ public final class KeenAC extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(wallInteractCheck, this);
         Bukkit.getPluginManager().registerEvents(noSlowCheck, this);
         Bukkit.getPluginManager().registerEvents(noWebCheck, this);
+        Bukkit.getPluginManager().registerEvents(windfallCombatCheckSuite, this);
 
         KeenACCommand executor = new KeenACCommand(this);
         getCommand("keenac").setExecutor(executor);
@@ -246,6 +251,7 @@ public final class KeenAC extends JavaPlugin {
         if (baritoneCheck != null) baritoneCheck.clearAll();
         if (baritoneACheck != null) baritoneACheck.clearAll();
         if (scaffoldCheck != null) scaffoldCheck.clearAll();
+        if (windfallCombatCheckSuite != null) windfallCombatCheckSuite.clearAll();
         if (alertManager != null) alertManager.clearAll();
         if (evidenceManager != null) evidenceManager.clearAll();
         if (playerContextManager != null) playerContextManager.clearAll();
