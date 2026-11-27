@@ -11,11 +11,16 @@ import java.util.UUID;
 public final class EvidenceManager {
     private final KeenAC plugin;
     private final PlayerContextManager contexts;
-    private final EvidenceStore store = new EvidenceStore();
+    private final EvidenceStore store;
 
     public EvidenceManager(KeenAC plugin, PlayerContextManager contexts) {
         this.plugin = plugin;
         this.contexts = contexts;
+        int maxPlayers = Math.max(1, Math.min(10_000,
+                plugin.getConfig().getInt("evidence.max-players", EvidenceStore.DEFAULT_MAX_PLAYERS)));
+        int maxPerPlayer = Math.max(1, Math.min(2_000,
+                plugin.getConfig().getInt("evidence.max-per-player", EvidenceStore.DEFAULT_MAX_PER_PLAYER)));
+        this.store = new EvidenceStore(maxPlayers, maxPerPlayer);
     }
 
     public EvidenceRecord record(Player player, String checkName, int violationLevel, String reason) {
