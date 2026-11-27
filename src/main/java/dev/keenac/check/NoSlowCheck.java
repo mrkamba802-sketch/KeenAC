@@ -84,7 +84,7 @@ public final class NoSlowCheck implements Listener {
                 pendingUsePackets.remove(id, at);
                 continue;
             }
-            if (player.hasActiveItem() && isTrackedConsumable(player.getActiveItem())) {
+            if (player.hasActiveItem() && isTrackedUseItem(player.getActiveItem())) {
                 beginUse(player, at);
                 pendingUsePackets.remove(id, at);
             }
@@ -138,7 +138,7 @@ public final class NoSlowCheck implements Listener {
     private void handlePacketMovement(Player player, Location to, long sampleNanos) {
         if (!plugin.getConfig().getBoolean("checks.no-slow.enabled", true)) return;
         UUID id = player.getUniqueId();
-        if (!player.hasActiveItem() || !isTrackedConsumable(player.getActiveItem())) {
+        if (!player.hasActiveItem() || !isTrackedUseItem(player.getActiveItem())) {
             if (!pendingConsumeCancellation.containsKey(id)) usingItems.remove(id);
             return;
         }
@@ -225,7 +225,7 @@ public final class NoSlowCheck implements Listener {
 
             int currentVl = violations.getOrDefault(id, 0);
             if (plugin.getConfig().getBoolean("checks.no-slow.cancel-consume", true) && currentVl >= 3) {
-                Material used = getTrackedItemType(player);
+                Material used = getConsumableType(player);
                 if (used != null) pendingConsumeCancellation.put(id, used);
             }
         }
@@ -315,7 +315,7 @@ public final class NoSlowCheck implements Listener {
             // Keep interrupting while recent movement samples still prove NoSlow.
             // As soon as normal movement is observed, lastSuspiciousNanos is cleared
             // and the player can continue using the item without being interrupted.
-            if (player.hasActiveItem() && isTrackedConsumable(player.getActiveItem())
+            if (player.hasActiveItem() && isTrackedUseItem(player.getActiveItem())
                     && player.getActiveItem().getType() == tracked
                     && data != null
                     && data.lastSuspiciousNanos >= data.lastUseAttemptNanos
@@ -372,17 +372,28 @@ public final class NoSlowCheck implements Listener {
                 || plugin.getConfig().getBoolean("checks.no-slow.reset-food", true);
     }
 
-    private Material getTrackedItemType(Player player) {
+    private Material getConsumableType(Player player) {
         ItemStack main = player.getInventory().getItemInMainHand();
-        if (isTrackedConsumable(main)) return main.getType();
+        if (isConsumable(main)) return main.getType();
         ItemStack off = player.getInventory().getItemInOffHand();
-        return isTrackedConsumable(off) ? off.getType() : null;
+        return isConsumable(off) ? off.getType() : null;
     }
 
-    private boolean isTrackedConsumable(ItemStack item) {
+    private boolean isConsumable(ItemStack item) {
         if (item == null || item.getType().isAir()) return false;
         Material type = item.getType();
         return type.isEdible() || type == Material.POTION || type == Material.MILK_BUCKET;
+    }
+
+
+    private boolean isTrackedUseItem(ItemStack item) {
+        if (item == null || item.getType().isAir()) return false;
+        Material type = item.getType();
+        // Track the full set of common modern item-use slowdown states.
+        return type.isEdible() || type == Material.POTION || type == Material.MILK_BUCKET
+                || type == Material.SHIELD || type == Material.BOW
+                || type == Material.CROSSBOW || type == Material.TRIDENT
+                || type == Material.SPYGLASS || type == Material.GOAT_HORN;
     }
 
     /**
