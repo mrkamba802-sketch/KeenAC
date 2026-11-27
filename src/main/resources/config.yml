@@ -24,6 +24,11 @@ checks:
         enabled: true
       crystal:
         enabled: true
+      criticals:
+        enabled: true
+      sword-block:
+        # Legacy sword blocking (1.7-1.8) is not part of modern 1.21 combat.
+        enabled: false
     movement:
       air-liquid-break:
         enabled: true
@@ -95,6 +100,8 @@ checks:
       sprint:
         enabled: true
       vehicle:
+        enabled: true
+      transaction:
         enabled: true
   # Shared server-authoritative correction used by Motion and NoSlow.
   movement-setback:
