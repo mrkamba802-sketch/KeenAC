@@ -413,6 +413,7 @@ public final class MotionCheck implements Listener {
     private void refreshMotionPacketProfile(Player player, boolean enabled) {
         UUID id = player.getUniqueId();
         Location location = player.getLocation();
+        long now = System.currentTimeMillis();
         long velocityGrace = Math.max(0L,
                 plugin.getConfig().getLong("checks.motion.velocity-grace-ms", 1200L));
         boolean recentVelocity = plugin.getPlayerContextManager()
