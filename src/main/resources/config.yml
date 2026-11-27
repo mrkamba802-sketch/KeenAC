@@ -40,6 +40,14 @@ checks:
         enabled: true
       fast-break:
         enabled: true
+      gravity:
+        enabled: true
+      simulation:
+        enabled: true
+      velocity:
+        enabled: true
+      elytra:
+        enabled: true
       ground-spoof:
         enabled: true
       illegal-move:
