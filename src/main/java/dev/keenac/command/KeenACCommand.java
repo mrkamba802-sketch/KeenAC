@@ -65,7 +65,7 @@ public final class KeenACCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(color("&bKeenAC &8» &cНедостаточно прав."));
                 return true;
             }
-            plugin.reloadChecks();
+            plugin.reloadConfig();
             sender.sendMessage(color("&bKeenAC &8» &aКонфигурация перезагружена."));
             plugin.getLogger().info(sender.getName() + " reloaded the configuration.");
             return true;
