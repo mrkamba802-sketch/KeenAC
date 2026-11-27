@@ -38,7 +38,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -143,7 +142,7 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
                         PacketState live = states.get(id);
                         if (live != null) {
                             live.invalidVehicleInteract++;
-                            if (live.invalidVehicleInteract >= 4) {
+                            if (live.invalidVehicleInteract >= CheckSettings.integer(plugin, "packet.vehicle", "invalid-interact-confirmations", 4)) {
                                 flag(online, "Vehicle", "Repeated INTERACT_AT packets were sent while not mounted in a vehicle.");
                                 live.invalidVehicleInteract = 0;
                             }
@@ -275,7 +274,7 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
         }
         String brand = new String(raw, StandardCharsets.UTF_8)
                 .toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        for (String token : plugin.getConfig().getStringList("checks.packet.client-brand.review-brands")) {
+        for (String token : CheckSettings.strings(plugin, "packet.client-brand", "review-brands", List.of("wurst", "liquidbounce", "rusherhack", "meteor", "inertia", "aristois", "rise", "vape", "phobos", "salhack", "tenacity"))) {
             if (brand.contains(token)) {
                 // Brand strings are self-reported metadata, not proof of cheating.
                 flag(player, "Client Brand", "Client reported a brand string requiring staff review: " + token + ".");
@@ -299,7 +298,7 @@ public final class PacketCheckSuite extends PacketListenerAbstract implements Li
     }
 
     private void reviewCreative(Player player, PacketState state, int slot, long now) {
-        if (slot < -1 || slot > CheckSettings.integer(plugin, "packet.exploit", "max-slot", 60)) {
+        if (slot < -1 || slot > CheckSettings.integer(plugin, "packet.creative", "max-slot", 60)) {
             if (enabled("exploit")) flag(player, "Exploit", "Creative inventory packet contained an invalid slot.");
         }
         if (!enabled("creative")) return;
