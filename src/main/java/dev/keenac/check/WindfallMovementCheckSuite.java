@@ -22,6 +22,8 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -121,6 +123,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             double dx = x - state.lastPacketX;
             double dy = y - state.lastPacketY;
             double dz = z - state.lastPacketZ;
+            reviewGravitySimulation(player, state, dy, Math.hypot(dx, dz), clientGround, now);
             double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             long teleportAge = plugin.getPlayerContextManager().snapshot(player).teleportAgeMs();
             if (enabled("illegal-move") && distance > 8.0
@@ -160,6 +163,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         state.lastPacketX = x;
         state.lastPacketY = y;
         state.lastPacketZ = z;
+        state.lastPacketNanos = now;
         state.hasPacketPosition = true;
 
         // Ground Spoof / NoFall: require repeated client-ground claims while
@@ -185,6 +189,71 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             state.groundSpoofSamples = 0;
             state.airborneStartY = 0.0;
         }
+    }
+
+    private void reviewGravitySimulation(Player player, MovementState state,
+                                          double deltaY, double horizontalDelta,
+                                          boolean clientGround, long now) {
+        if (clientGround || player.isOnGround() || isGravityExempt(player)) {
+            state.previousVerticalDelta = 0.0;
+            state.gravitySamples = 0;
+            state.simulationSamples = 0;
+            return;
+        }
+        if (now - state.lastPacketNanos > 300_000_000L) {
+            state.previousVerticalDelta = deltaY;
+            state.gravitySamples = 0;
+            state.simulationSamples = 0;
+            return;
+        }
+
+        var context = plugin.getPlayerContextManager().snapshot(player);
+        if ((context.teleportAgeMs() >= 0L && context.teleportAgeMs() < 500L)
+                || (context.velocityAgeMs() >= 0L && context.velocityAgeMs() < 500L)
+                || horizontalDelta < 0.04) {
+            state.previousVerticalDelta = deltaY;
+            state.gravitySamples = 0;
+            state.simulationSamples = 0;
+            return;
+        }
+
+        // Modern vanilla vertical motion: gravity followed by air drag.
+        double predicted = (state.previousVerticalDelta - 0.08) * 0.98;
+        double deviation = Math.abs(deltaY - predicted);
+
+        if (enabled("gravity")) {
+            if (deviation > 0.26) {
+                state.gravitySamples++;
+                if (state.gravitySamples >= 8) {
+                    flag(player, "Gravity", String.format(java.util.Locale.ROOT,
+                            "Repeated vertical acceleration differed from the vanilla gravity model by %.3f blocks/tick.", deviation));
+                    state.gravitySamples = 0;
+                }
+            } else {
+                state.gravitySamples = Math.max(0, state.gravitySamples - 1);
+            }
+        }
+
+        if (enabled("simulation")) {
+            if (deviation > 0.18) {
+                state.simulationSamples++;
+                if (state.simulationSamples >= 12) {
+                    flag(player, "Simulation", String.format(java.util.Locale.ROOT,
+                            "Repeated movement samples differed from the server-side vertical simulation by %.3f blocks/tick.", deviation));
+                    state.simulationSamples = 0;
+                }
+            } else {
+                state.simulationSamples = Math.max(0, state.simulationSamples - 1);
+            }
+        }
+        state.previousVerticalDelta = deltaY;
+    }
+
+    private boolean isGravityExempt(Player player) {
+        return player.isInsideVehicle() || player.isFlying() || player.isGliding()
+                || player.isSwimming() || player.isInWater() || player.isClimbing()
+                || player.hasPotionEffect(PotionEffectType.LEVITATION)
+                || player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
     }
 
     private void recordDigging(UUID id, DiggingAction action, int x, int y, int z) {
@@ -438,6 +507,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         Player player = event.getPlayer();
         MovementState state = state(player);
         long now = System.nanoTime();
+        reviewVelocityResponse(player, state, to.clone().subtract(from).toVector());
         double dx = to.getX() - from.getX();
         double dy = to.getY() - from.getY();
         double dz = to.getZ() - from.getZ();
@@ -499,6 +569,69 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             state.airborneStartY = from.getY();
         }
         state.lastMoveNanos = now;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onVelocity(PlayerVelocityEvent event) {
+        Player player = event.getPlayer();
+        if (!enabled("velocity")) return;
+        if (player.isInsideVehicle() || player.isFlying() || player.isGliding()
+                || player.isSwimming() || player.isInWater()) return;
+        Vector velocity = event.getVelocity().clone();
+        double horizontal = Math.hypot(velocity.getX(), velocity.getZ());
+        if (horizontal < 0.32) return;
+
+        MovementState state = state(player);
+        state.expectedKnockback = velocity;
+        state.knockbackDirection = new Vector(velocity.getX(), 0.0, velocity.getZ()).normalize();
+        state.knockbackProjection = 0.0;
+        state.knockbackSamples = 0;
+        state.knockbackStartedNanos = System.nanoTime();
+    }
+
+    private void reviewVelocityResponse(Player player, MovementState state, Vector delta) {
+        if (!enabled("velocity") || state.expectedKnockback == null) return;
+        long age = System.nanoTime() - state.knockbackStartedNanos;
+        if (age > 450_000_000L || player.isInsideVehicle() || player.isFlying()
+                || player.isGliding() || player.isSwimming() || player.isInWater()) {
+            finishVelocityReview(player, state);
+            return;
+        }
+        if (plugin.getPlayerContextManager().snapshot(player).pingMs() > 160) {
+            state.expectedKnockback = null;
+            return;
+        }
+
+        Location origin = player.getLocation().add(0.0, 0.9, 0.0);
+        RayTraceResult obstruction = player.getWorld().rayTraceBlocks(
+                origin, state.knockbackDirection, 0.55);
+        if (obstruction != null && obstruction.getHitBlock() != null) {
+            state.expectedKnockback = null;
+            return;
+        }
+
+        state.knockbackProjection += delta.getX() * state.knockbackDirection.getX()
+                + delta.getZ() * state.knockbackDirection.getZ();
+        state.knockbackSamples++;
+        if (state.knockbackSamples >= 4) finishVelocityReview(player, state);
+    }
+
+    private void finishVelocityReview(Player player, MovementState state) {
+        if (state.expectedKnockback == null) return;
+        double expected = Math.hypot(state.expectedKnockback.getX(),
+                state.expectedKnockback.getZ()) * 0.85;
+        if (state.knockbackSamples >= 3 && expected > 0.35
+                && state.knockbackProjection < expected * 0.20) {
+            state.velocityRejects++;
+            if (state.velocityRejects >= 2) {
+                flag(player, "Velocity", "Repeated server velocity impulses produced substantially less movement than expected.");
+                state.velocityRejects = 0;
+            }
+        } else {
+            state.velocityRejects = Math.max(0, state.velocityRejects - 1);
+        }
+        state.expectedKnockback = null;
+        state.knockbackDirection = null;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -574,6 +707,16 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private long placeWindowStart;
         private long lastJumpNanos;
         private long lastMoveNanos;
+        private long lastPacketNanos;
+        private long knockbackStartedNanos;
+        private double previousVerticalDelta;
+        private Vector expectedKnockback;
+        private Vector knockbackDirection;
+        private double knockbackProjection;
+        private int knockbackSamples;
+        private int velocityRejects;
+        private int gravitySamples;
+        private int simulationSamples;
         private double airborneStartY;
         private double lastPacketX;
         private double lastPacketY;
