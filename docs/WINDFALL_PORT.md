@@ -20,7 +20,7 @@ cancel packets, or apply standalone punishments.
 | Kill Aura | Existing `AuraCheck` is retained; new multi-target-per-window signal added to `WindfallCombatCheckSuite` |
 | Macro | `WindfallCombatCheckSuite`; repeated ground-movement direction sequences |
 | Multi Interact | `WindfallCombatCheckSuite`; distinct attack targets inside a short packet window |
-| Reach | Existing `ReachCheck`; historical target hitboxes and bounded ping rewind retained |
+| Reach | Existing `ReachCheck`; historical target hitboxes, bounded ping rewind, and a five-frame/250 ms attacker-position window are combined |
 | Self Interact | `WindfallCombatCheckSuite`; self entity-id interaction |
 | Sword Block | Disabled by default: legacy sword-block combat is not present on 1.21.4 |
 | Crystal | `WindfallCombatCheckSuite`; rapid crystal place/attack timing |
@@ -41,7 +41,7 @@ cancel packets, or apply standalone punishments.
 | Illegal Move | `WindfallMovementCheckSuite`; non-finite/out-of-bounds and unexplained large position discontinuities |
 | Invalid Break / Place / Place Cursor | `WindfallMovementCheckSuite`; invalid dig targets, invalid placement heights/chunks, look-ray mismatch |
 | Multi Break / Place | `WindfallMovementCheckSuite`; action packet burst review |
-| NoSlow | Existing `NoSlowCheck` and `NoSlowMovementSpeed`; potion, item-use and movement allowances retained |
+| NoSlow | Existing `NoSlowCheck` and `NoSlowMovementSpeed`; server-authoritative item-use sampling, potion/attribute allowances, friction exemptions and setback evidence are retained (the Windfall version was a simpler packet-rate heuristic) |
 | No Swing | `WindfallMovementCheckSuite`; block interactions without a recent arm-swing packet |
 | Omni-Sprint | `WindfallMovementCheckSuite`; repeated backward movement while sprinting |
 | Phase | `WindfallMovementCheckSuite`; movement segments crossing solid block boundaries |
