@@ -39,6 +39,10 @@ Staff with `keenac.review` can inspect the latest records using `/keenac review 
 
 The `checks.no-slow.potion-effects` option controls whether potion-driven movement attribute changes and Dolphin's Grace are included in the NoSlow movement allowance. When disabled, the check uses the base movement attribute and does not apply the Dolphin's Grace bonus.
 
+## Baritone movement review
+
+KeenAC includes two alert-only Baritone movement-pattern reviews. The original `checks.baritone` looks for recurring route motifs; `checks.baritone-a` reviews repeated, closely correlated camera and travel-direction turns without requiring the same route to repeat. Both use server-thread eligibility snapshots, ignore unstable movement contexts, and send findings through the evidence and staff-alert systems. They are advisory signals and do not identify a specific client with certainty.
+
 ## Motion diagnostics
 
 The Motion module exposes `KeenAC#getMotionCheck().recordSuspicion(player, reason)`
