@@ -225,6 +225,13 @@ checks:
     maximum-segment-distance: 10.0
     yaw-turn-tolerance-degrees: 12.0
     maximum-average-yaw-error-degrees: 8.0
+    # Rotation-snap-density signal: repeated horizontal yaw steps with stable pitch.
+    rotation-snap-required-count: 7
+    rotation-snap-min-yaw-degrees: 12.0
+    rotation-snap-max-yaw-degrees: 150.0
+    rotation-snap-max-pitch-degrees: 0.75
+    rotation-snap-max-average-pitch-degrees: 0.45
+    rotation-snap-min-travel-distance: 4.0
     # Advisory only: this is a movement-pattern signal, not proof of a named client.
     log-context: true
 
