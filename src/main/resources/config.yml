@@ -2,118 +2,315 @@
 # All distances are measured in blocks; time values are in seconds or server ticks as noted.
 
 checks:
-  # Adapted Windfall combat signals. All checks are advisory and use KeenAC's
-  # shared AlertManager/EvidenceManager; no standalone punishment is applied.
-  windfall:
-    combat:
-      autoclicker:
-        enabled: true
-      backtrack:
-        enabled: true
-      hitboxes:
-        enabled: true
-      multi-interact:
-        enabled: true
-      self-interact:
-        enabled: true
-      interact-cursor:
-        enabled: true
-      macro:
-        enabled: true
-      fast-heal:
-        # Windfall Fast Heal A supports legacy protocols 5-107 only.
-        enabled: false
-      crystal:
-        enabled: true
-      criticals:
-        enabled: true
-      kill-aura:
-        enabled: true
-      sword-block:
-        # Legacy sword blocking (1.7-1.8) is not part of modern 1.21 combat.
-        enabled: false
-    movement:
-      air-liquid-break:
-        enabled: true
-      air-liquid-place:
-        enabled: true
-      far-break:
-        enabled: true
-      far-place:
-        enabled: true
-      fast-break:
-        enabled: true
-      gravity:
-        enabled: true
-      simulation:
-        enabled: true
-      velocity:
-        enabled: true
-      elytra:
-        enabled: true
-      ground-spoof:
-        enabled: true
-      illegal-move:
-        enabled: true
-      invalid-break:
-        enabled: true
-      invalid-place:
-        enabled: true
-      invalid-place-cursor:
-        enabled: true
-      multi-break:
-        enabled: true
-      multi-place:
-        enabled: true
-      no-fall:
-        enabled: true
-      no-swing:
-        enabled: true
-      omni-sprint:
-        enabled: true
-      phase:
-        enabled: true
-      position-break:
-        enabled: true
-      position-place:
-        enabled: true
-      rotation-break:
-        enabled: true
-      rotation-place:
-        enabled: true
-      scaffold-support:
-        enabled: true
-      step:
-        enabled: true
-      timer:
-        enabled: true
-      wrong-break:
-        enabled: true
-    packet:
-      bad-packets:
-        enabled: true
-      chat:
-        enabled: true
-      chest-stealer:
-        enabled: true
-      client-brand:
-        enabled: true
-      crash:
-        enabled: true
-      creative:
-        enabled: true
-      exploit:
-        enabled: true
-      inventory:
-        enabled: true
-      packet-order:
-        enabled: true
-      sprint:
-        enabled: true
-      vehicle:
-        enabled: true
-      transaction:
-        enabled: true
+  combat:
+    autoclicker:
+      enabled: true
+      min-interval-ms: 20.0
+      max-interval-ms: 500.0
+      sample-size: 32
+      minimum-samples: 20
+      mean-min-ms: 48.0
+      mean-max-ms: 160.0
+      max-standard-deviation-ms: 1.35
+      confirm-windows: 2
+    backtrack:
+      enabled: true
+      target-movement-max-age-ms: 180
+      max-ping-ms: 150
+      min-target-displacement: 0.55
+      min-distance: 3.65
+      max-distance: 5.25
+      confirm-hits: 3
+    criticals:
+      enabled: true
+      min-downward-velocity: 0.11
+      max-downward-velocity: 0.50
+      upward-tolerance: 0.01
+      confirm-attacks: 4
+    fast-heal:
+      # Disabled by default: the upstream heuristic targets legacy protocols 5-107.
+      enabled: false
+      minimum-consume-interval-ms: 1250
+      confirm-intervals: 2
+    hitboxes:
+      enabled: true
+      max-ping-ms: 120
+      min-distance: 3.2
+      max-distance: 4.4
+      look-distance: 4.5
+      confirm-hits: 3
+    kill-aura:
+      enabled: true
+      window-ms: 1000
+      max-distinct-targets: 4
+      confirm-windows: 2
+    macro:
+      enabled: true
+      min-movement-delta: 0.025
+      direction-deadzone: 0.025
+      sequence-length: 12
+      confirm-repeats: 2
+    multi-interact:
+      enabled: true
+      window-ms: 50
+      max-distinct-targets: 1
+    self-interact:
+      enabled: true
+    interact-cursor:
+      enabled: true
+      max-distance: 4.5
+      confirm-interactions: 3
+    crystal:
+      enabled: true
+      stale-entity-ms: 60000
+      buffer-decay-window-ms: 100
+      fast-cycle-window-ms: 40
+      fast-buffer-add: 2.0
+      fast-buffer-threshold: 6.0
+      fast-buffer-reset: 3.0
+      fast-buffer-decay: 0.25
+      idle-buffer-decay: 0.1
+      spawn-tick-window-ms: 50
+      spawn-buffer-add: 1.5
+      spawn-buffer-threshold: 5.0
+    sword-block:
+      # Legacy sword blocking (1.7-1.8) is not supported on modern 1.21 combat.
+      enabled: false
+
+  movement:
+    air-liquid-break:
+      enabled: true
+      falling-velocity: 0.10
+      confirm-samples: 3
+    air-liquid-place:
+      enabled: true
+      falling-velocity: 0.10
+      confirm-samples: 3
+    far-break:
+      enabled: true
+      min-distance: 6.0
+      max-distance: 12.0
+      confirm-samples: 2
+    far-place:
+      enabled: true
+      max-distance: 6.0
+      confirm-samples: 2
+    fast-break:
+      enabled: true
+      max-break-time-ms: 90
+      confirm-samples: 2
+    gravity:
+      enabled: true
+      min-sample-interval-ms: 40
+      stale-sample-interval-ms: 250
+      max-step-ticks: 4
+      gravity-per-tick: 0.08
+      vertical-drag: 0.98
+      minimum-horizontal-delta: 0.04
+      teleport-grace-ms: 500
+      velocity-grace-ms: 500
+      max-deviation: 0.26
+      confirm-samples: 8
+    simulation:
+      enabled: true
+      max-deviation: 0.18
+      confirm-samples: 12
+    velocity:
+      enabled: true
+      minimum-impulse: 0.32
+      max-ping-ms: 160
+      review-after-ms: 200
+      obstruction-distance: 0.60
+      expected-displacement-multiplier: 2.0
+      minimum-expected-displacement: 0.55
+      minimum-response-ratio: 0.20
+      confirm-impulses: 2
+    elytra:
+      enabled: true
+      hover-vertical-tolerance: 0.005
+      hover-confirm-ticks: 40
+      firework-grace-ms: 2500
+      kick-boost-start-ticks: 3
+      kick-boost-min-ascent: 0.50
+      kick-boost-confirm-samples: 2
+      ascent-grace-ticks: 5
+      ascent-min-delta: 0.12
+      ascent-confirm-samples: 4
+    ground-spoof:
+      enabled: true
+      confirm-samples: 4
+    illegal-move:
+      enabled: true
+      world-margin: 64
+      max-position-jump: 8.0
+      teleport-grace-ms: 1500
+      confirm-samples: 2
+    invalid-break:
+      enabled: true
+      confirm-samples: 3
+    invalid-place:
+      enabled: true
+      confirm-samples: 2
+    invalid-place-cursor:
+      enabled: true
+      max-distance: 6.0
+      confirm-samples: 3
+    multi-break:
+      enabled: true
+      window-ms: 50
+      max-packets: 2
+    multi-place:
+      enabled: true
+      window-ms: 50
+      max-packets: 2
+    no-fall:
+      enabled: true
+      min-fall-distance: 3.0
+      confirm-samples: 2
+    no-swing:
+      enabled: true
+      grace-ms: 350
+      confirm-samples: 3
+    omni-sprint:
+      enabled: true
+      minimum-horizontal-delta: 0.08
+      maximum-forward-dot: -0.35
+      confirm-samples: 4
+    phase:
+      enabled: true
+      minimum-horizontal-delta: 0.65
+      maximum-horizontal-delta: 2.5
+      ray-height-offset: 0.9
+      ray-end-margin: 0.15
+      confirm-samples: 2
+    position-break:
+      enabled: true
+      min-distance: 5.2
+      max-distance: 8.0
+      confirm-samples: 2
+    position-place:
+      enabled: true
+      min-distance: 5.2
+      max-distance: 8.0
+      confirm-samples: 2
+    rotation-break:
+      enabled: true
+      max-distance: 5.5
+      max-angle-degrees: 72.0
+      confirm-samples: 3
+    rotation-place:
+      enabled: true
+      max-distance: 5.5
+      max-angle-degrees: 72.0
+      confirm-samples: 3
+    scaffold-support:
+      enabled: true
+      minimum-feet-gap: -0.15
+      maximum-feet-gap: 1.25
+      confirm-placements: 5
+    step:
+      enabled: true
+      minimum-height: 0.85
+      maximum-height: 1.6
+      minimum-horizontal-delta: 0.05
+      velocity-grace-ms: 500
+      confirm-samples: 2
+    timer:
+      enabled: true
+      window-ms: 1000
+      max-packets: 28
+      confirm-windows: 3
+    wrong-break:
+      enabled: true
+      match-grace-ms: 500
+
+  packet:
+    bad-packets:
+      enabled: true
+      world-margin: 64
+      max-yaw-degrees: 180.0
+      max-pitch-degrees: 90.0
+      confirm-invalid-rotations: 3
+    chat:
+      enabled: true
+      minute-window-ms: 60000
+      max-messages-per-minute: 60
+      burst-window-ms: 2000
+      max-burst-messages: 4
+      confirm-minute-windows: 2
+      confirm-burst-windows: 2
+    chest-stealer:
+      enabled: true
+      burst-window-ms: 500
+      max-clicks-per-burst: 6
+      confirm-bursts: 3
+      max-clicks-per-session: 40
+    client-brand:
+      enabled: true
+      # Reported brand strings are review signals only, not proof of cheating.
+      review-brands:
+        - wurst
+        - liquidbounce
+        - rusherhack
+        - meteor
+        - inertia
+        - aristois
+        - rise
+        - vape
+        - phobos
+        - salhack
+        - tenacity
+    crash:
+      enabled: true
+      max-chat-length: 32767
+      max-plugin-message-bytes: 32767
+    creative:
+      enabled: true
+      min-slot: -1
+      max-slot: 60
+      action-window-ms: 50
+      max-actions-per-window: 5
+    exploit:
+      enabled: true
+      min-window-id: 0
+      max-window-id: 200
+      min-slot: -1
+      max-slot: 60
+      min-entity-id: -1
+      max-entity-id: 20000
+    inventory:
+      enabled: true
+      click-window-ms: 1000
+      max-clicks-per-window: 20
+    packet-order:
+      enabled: true
+      burst-window-ms: 100
+      max-packets-per-window: 70
+      confirm-windows: 3
+      duplicate-samples: 12
+    sprint:
+      enabled: true
+      toggle-window-ms: 1000
+      max-toggles-per-window: 4
+      confirm-windows: 3
+    transaction:
+      enabled: true
+      probe-interval-ticks: 40
+      minimum-timeout-ms: 2500
+      maximum-timeout-ms: 8000
+      ping-multiplier: 3
+      ping-offset-ms: 1000
+      review-window-ms: 10000
+      missing-probes-confirm: 3
+      unmatched-pong-confirm: 2
+    vehicle:
+      enabled: true
+      steer-window-ms: 50
+      max-steer-packets-per-window: 3
+      confirm-burst-windows: 3
+      max-input-magnitude: 2.0
+      invalid-interact-confirmations: 4
+
   # Shared server-authoritative correction used by Motion and NoSlow.
   movement-setback:
     enabled: true
