@@ -23,7 +23,10 @@ public final class CheckSettings {
     }
 
     public static int integer(KeenAC plugin, String check, String key, int fallback) {
-        return Math.max(1, plugin.getConfig().getInt(path(check, key), fallback));
+        int value = plugin.getConfig().getInt(path(check, key), fallback);
+        // Packet identifiers and inventory slots legitimately use -1 sentinels.
+        if (key.startsWith("min-")) return value;
+        return Math.max(1, value);
     }
 
     public static long longValue(KeenAC plugin, String check, String key, long fallback) {
