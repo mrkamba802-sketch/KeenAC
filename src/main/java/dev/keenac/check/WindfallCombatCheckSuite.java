@@ -117,7 +117,7 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
             flag(attacker, "Self Interact", "Attack packet targeted the sender's own entity id.");
         }
 
-        Entity target = Bukkit.getEntity(targetId);
+        Entity target = findEntity(attacker, targetId);
         if (target instanceof Player targetPlayer) {
             reviewBacktrack(attacker, targetPlayer, state, now);
             reviewHitbox(attacker, targetPlayer, state, now);
@@ -126,7 +126,7 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
 
     private void handleInteract(Player player, int targetId) {
         if (!enabled("interact-cursor")) return;
-        Entity target = Bukkit.getEntity(targetId);
+        Entity target = findEntity(player, targetId);
         if (target == null || target == player || target.getWorld() != player.getWorld()) return;
         if (player.getGameMode().name().equals("SPECTATOR")) return;
 
@@ -210,11 +210,18 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         }
     }
 
+    private Entity findEntity(Player viewer, int entityId) {
+        for (Entity entity : viewer.getWorld().getEntities()) {
+            if (entity.getEntityId() == entityId) return entity;
+        }
+        return null;
+    }
+
     private boolean isLookingAt(Player player, Entity target, double maxDistance) {
         Location eye = player.getEyeLocation();
         RayTraceResult result = player.getWorld().rayTraceEntities(
                 eye, eye.getDirection(), maxDistance, 0.05,
-                entity -> entity.getUniqueId().equals(target.getUniqueId()));
+                entity -> entity != player);
         return result != null && result.getHitEntity() != null
                 && result.getHitEntity().getUniqueId().equals(target.getUniqueId());
     }
