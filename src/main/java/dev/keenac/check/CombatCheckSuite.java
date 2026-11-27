@@ -350,7 +350,8 @@ public final class CombatCheckSuite extends PacketListenerAbstract implements Li
     }
 
     private void reviewMacro(Player player, CombatState state) {
-        int sequenceLength = CheckSettings.integer(plugin, "combat.macro", "sequence-length", 12);\n        if (state.movementPattern.size() < sequenceLength * 3) return;
+        int sequenceLength = CheckSettings.integer(plugin, "combat.macro", "sequence-length", 12);
+        if (state.movementPattern.size() < sequenceLength * 3) return;
         Integer[] samples = state.movementPattern.toArray(new Integer[0]);
         int size = samples.length;
         boolean repeat = true;
@@ -364,7 +365,7 @@ public final class CombatCheckSuite extends PacketListenerAbstract implements Li
         if (repeat) {
             state.macroRepeats++;
             state.movementPattern.clear();
-            if (state.macroRepeats >= CheckSettings.integer(plugin, "combat.macro", "confirm-repeats", 2) {
+            if (state.macroRepeats >= CheckSettings.integer(plugin, "combat.macro", "confirm-repeats", 2)) {
                 flag(player, "Macro", "Repeated ground-movement direction sequence detected across three consecutive windows.");
                 state.macroRepeats = 0;
             }
