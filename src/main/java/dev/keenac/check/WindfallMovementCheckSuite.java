@@ -23,6 +23,7 @@ import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
@@ -512,6 +513,7 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         double dy = to.getY() - from.getY();
         double dz = to.getZ() - from.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
+        reviewElytra(player, state, dy, horizontal, now);
 
         if (enabled("omni-sprint") && player.isSprinting()
                 && !player.isInsideVehicle() && !player.isFlying()
@@ -569,6 +571,51 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
             state.airborneStartY = from.getY();
         }
         state.lastMoveNanos = now;
+    }
+
+    private void reviewElytra(Player player, MovementState state,
+                              double deltaY, double horizontalDelta, long now) {
+        if (!enabled("elytra")) return;
+        if (!player.isGliding()) {
+            state.elytraTicks = 0;
+            state.elytraHoverTicks = 0;
+            state.elytraAscentSamples = 0;
+            return;
+        }
+
+        state.elytraTicks++;
+        if (Math.abs(deltaY) <= 0.005) {
+            state.elytraHoverTicks++;
+            if (state.elytraHoverTicks >= 40) {
+                flag(player, "Elytra", "Sustained near-zero vertical movement was observed while gliding.");
+                state.elytraHoverTicks = 0;
+            }
+        } else {
+            state.elytraHoverTicks = Math.max(0, state.elytraHoverTicks - 2);
+        }
+
+        boolean recentFirework = state.lastFireworkNanos != 0L
+                && now - state.lastFireworkNanos < 2_500_000_000L;
+        if (state.elytraTicks > 5 && deltaY > 0.12 && !recentFirework
+                && horizontalDelta > 0.10) {
+            state.elytraAscentSamples++;
+            if (state.elytraAscentSamples >= 4) {
+                flag(player, "Elytra", "Repeated sustained ascent while gliding had no recent firework boost.");
+                state.elytraAscentSamples = 0;
+            }
+        } else {
+            state.elytraAscentSamples = Math.max(0, state.elytraAscentSamples - 1);
+        }
+
+        // MotionCheck already owns horizontal ElytraSpeed measurement; this class
+        // only adds the hover/ascent signals to avoid duplicate speed flags.
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onFireworkUse(PlayerInteractEvent event) {
+        if (event.getItem() == null
+                || event.getItem().getType() != Material.FIREWORK_ROCKET) return;
+        state(event.getPlayer()).lastFireworkNanos = System.nanoTime();
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -715,6 +762,10 @@ public final class WindfallMovementCheckSuite extends PacketListenerAbstract imp
         private double knockbackProjection;
         private int knockbackSamples;
         private int velocityRejects;
+        private int elytraTicks;
+        private int elytraHoverTicks;
+        private int elytraAscentSamples;
+        private long lastFireworkNanos;
         private int gravitySamples;
         private int simulationSamples;
         private double airborneStartY;
