@@ -86,12 +86,6 @@ public final class PlayerContextManager implements Listener {
         lastVelocityNanos.put(event.getPlayer().getUniqueId(), System.nanoTime());
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onDamage(EntityDamageEvent event) {
-        // Damage is intentionally not treated as a velocity event: the actual
-        // server-applied impulse is tracked separately by PlayerVelocityEvent.
-    }
-
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
