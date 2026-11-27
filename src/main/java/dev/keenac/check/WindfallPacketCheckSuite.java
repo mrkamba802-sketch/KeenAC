@@ -11,6 +11,9 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHe
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPluginMessage;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPing;
+import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSteerVehicle;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
@@ -55,10 +58,14 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
 
     private final KeenAC plugin;
     private final Map<UUID, PacketState> states = new ConcurrentHashMap<>();
+    private final BukkitTask transactionProbeTask;
+    private int transactionSequence;
 
     public WindfallPacketCheckSuite(KeenAC plugin) {
         super(PacketListenerPriority.NORMAL);
         this.plugin = plugin;
+        this.transactionProbeTask = Bukkit.getScheduler().runTaskTimer(
+                plugin, this::sendTransactionProbes, 40L, 40L);
     }
 
     @Override
@@ -68,6 +75,11 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
         var type = event.getPacketType();
         long now = System.nanoTime();
         PacketState state = states.computeIfAbsent(id, ignored -> new PacketState());
+
+        if (type == PacketType.Play.Client.PONG) {
+            handleTransactionPong(player, state, new WrapperPlayClientPong(event).getId(), now);
+            return;
+        }
 
         reviewPacketBurst(player, state, now);
 
@@ -443,7 +455,68 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
         states.remove(event.getPlayer().getUniqueId());
     }
 
+    private void sendTransactionProbes() {
+        long now = System.nanoTime();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            PacketState state = states.computeIfAbsent(player.getUniqueId(), ignored -> new PacketState());
+            int ping = Math.max(0, plugin.getPlayerContextManager().snapshot(player).pingMs());
+            long timeoutNanos = Math.max(2_500L, Math.min(8_000L, ping * 3L + 1_000L))
+                    * 1_000_000L;
+
+            for (Map.Entry<Integer, Long> entry : state.pendingPings.entrySet()) {
+                if (now - entry.getValue() > timeoutNanos
+                        && state.pendingPings.remove(entry.getKey(), entry.getValue())) {
+                    synchronized (state.skippedTransactions) {
+                        state.skippedTransactions.addLast(now);
+                        trimTimes(state.skippedTransactions, now, 10_000_000_000L);
+                    }
+                }
+            }
+
+            synchronized (state.skippedTransactions) {
+                trimTimes(state.skippedTransactions, now, 10_000_000_000L);
+                if (state.skippedTransactions.size() >= 3) {
+                    flag(player, "Transaction", "Three or more server ping probes went unanswered within the rolling review window.");
+                    state.skippedTransactions.clear();
+                }
+            }
+
+            int probeId = 0x4B454E00 | (++transactionSequence & 0xFF);
+            state.pendingPings.put(probeId, now);
+            try {
+                PacketEvents.getAPI().getPlayerManager().sendPacket(
+                        player, new WrapperPlayServerPing(probeId));
+            } catch (RuntimeException exception) {
+                state.pendingPings.remove(probeId);
+                plugin.getLogger().fine("Could not send transaction probe to "
+                        + player.getName() + ": " + exception.getMessage());
+            }
+        }
+    }
+
+    private void handleTransactionPong(Player player, PacketState state, int id, long now) {
+        Long sentAt = state.pendingPings.remove(id);
+        if (sentAt != null) return;
+        if ((id & 0xFFFFFF00) != 0x4B454E00) return;
+
+        synchronized (state.unknownTransactions) {
+            state.unknownTransactions.addLast(now);
+            trimTimes(state.unknownTransactions, now, 10_000_000_000L);
+            if (state.unknownTransactions.size() >= 2) {
+                flag(player, "Transaction", "Repeated duplicate or unmatched responses to KeenAC ping probes.");
+                state.unknownTransactions.clear();
+            }
+        }
+    }
+
+    private void trimTimes(Deque<Long> times, long now, long windowNanos) {
+        while (!times.isEmpty() && now - times.peekFirst() > windowNanos) {
+            times.removeFirst();
+        }
+    }
+
     public void clearAll() {
+        if (transactionProbeTask != null) transactionProbeTask.cancel();
         states.clear();
     }
 
@@ -454,11 +527,14 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
         private final Deque<Long> inventoryClicks = new ArrayDeque<>();
         private final Deque<Long> chestClicks = new ArrayDeque<>();
         private final Deque<Long> sprintToggles = new ArrayDeque<>();
+        private final Deque<Long> skippedTransactions = new ArrayDeque<>();
+        private final Deque<Long> unknownTransactions = new ArrayDeque<>();
+        private final Map<Integer, Long> pendingPings = new ConcurrentHashMap<>();
         private final Map<String, Integer> violationLevels = new HashMap<>();
-        private long packetTimesGuard;
+
         private long creativeWindowStart;
         private long steerWindowStart;
-        private long lastXBits;
+
         private int packetBurstWindows;
         private int invalidRotations;
         private int duplicateMovement;
