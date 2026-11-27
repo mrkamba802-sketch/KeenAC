@@ -34,7 +34,7 @@ jobs:
           xz --robot --list /tmp/keenac-engine.tar.xz || true
           xz -tvv /tmp/keenac-engine.tar.xz || true
           echo "=== Attempting tolerant decompression ==="
-          xz -dc --ignore-check=all /tmp/keenac-engine.tar.xz > /tmp/keenac-engine-recovered.tar 2>/tmp/keenac-xz-errors.log || true
+          xz -dc --ignore-check /tmp/keenac-engine.tar.xz > /tmp/keenac-engine-recovered.tar 2>/tmp/keenac-xz-errors.log || true
           cat /tmp/keenac-xz-errors.log
           ls -lh /tmp/keenac-engine-recovered.tar || true
           tar --ignore-zeros -tf /tmp/keenac-engine-recovered.tar 2>/dev/null | sed -n '1,100p' || true
