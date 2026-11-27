@@ -93,7 +93,13 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
                 double z = location.getZ();
                 float yaw = location.getYaw();
                 float pitch = location.getPitch();
-                reviewMovementFields(player, state, x, y, z, yaw, pitch);
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    Player online = Bukkit.getPlayer(id);
+                    PacketState live = states.get(id);
+                    if (online != null && online.isOnline() && live != null) {
+                        reviewMovementFields(online, live, x, y, z, yaw, pitch);
+                    }
+                });
             }
             return;
         }
@@ -447,11 +453,25 @@ public final class WindfallPacketCheckSuite extends PacketListenerAbstract imple
     }
 
     private void flag(Player player, String check, String reason) {
-        if (player == null || !player.isOnline() || !plugin.isEnabled()) return;
-        PacketState state = states.computeIfAbsent(player.getUniqueId(), ignored -> new PacketState());
-        int vl = state.violationLevels.merge(check, 1, (old, one) ->
-                old == Integer.MAX_VALUE ? Integer.MAX_VALUE : old + 1);
-        plugin.getAlertManager().send(check, player, vl, reason);
+        if (player == null || !plugin.isEnabled()) return;
+        UUID id = player.getUniqueId();
+        Runnable deliver = () -> {
+            Player online = Bukkit.getPlayer(id);
+            if (online == null || !online.isOnline() || !plugin.isEnabled()) return;
+            PacketState state = states.computeIfAbsent(id, ignored -> new PacketState());
+            int vl = state.violationLevels.merge(check, 1, (old, one) ->
+                    old == Integer.MAX_VALUE ? Integer.MAX_VALUE : old + 1);
+            plugin.getAlertManager().send(check, online, vl, reason);
+        };
+        if (Bukkit.isPrimaryThread()) {
+            deliver.run();
+        } else {
+            try {
+                Bukkit.getScheduler().runTask(plugin, deliver);
+            } catch (RuntimeException ignored) {
+                // Ignore packet-thread flags while the plugin is shutting down.
+            }
+        }
     }
 
     @EventHandler
