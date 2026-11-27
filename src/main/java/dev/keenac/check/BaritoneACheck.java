@@ -150,6 +150,23 @@ public final class BaritoneACheck implements Listener {
      * PacketEvents entry point. Can receive both position-only and
      * rotation-only movement updates so turn correlation is not lost.
      */
+    public void recordRotation(UUID id, float yaw) {
+        if (!enabled || id == null || !Float.isFinite(yaw)) return;
+        PacketProfile profile = profiles.get(id);
+        PacketState state = states.get(id);
+        if (profile == null || !profile.eligible() || state == null) return;
+        synchronized (state) {
+            if (!state.hasYaw) {
+                state.lastYaw = yaw;
+                state.hasYaw = true;
+            } else {
+                state.accumulatedYawChange += BaritoneASteeringAnalyzer.wrapDegrees(
+                        yaw - state.lastYaw);
+                state.lastYaw = yaw;
+            }
+        }
+    }
+
     public void recordMovement(UUID id, double x, double z, float yaw,
                                boolean rotationChanged, boolean onGround) {
         if (!enabled || id == null || !Double.isFinite(x) || !Double.isFinite(z)
@@ -166,7 +183,7 @@ public final class BaritoneACheck implements Listener {
 
         long now = System.nanoTime();
         PacketState state = states.computeIfAbsent(id,
-                ignored -> new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now));
+                ignored -> new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns));
 
         boolean shouldAlert = false;
         int violationLevel = 0;
@@ -174,7 +191,7 @@ public final class BaritoneACheck implements Listener {
 
         synchronized (state) {
             if (!state.worldId.equals(profile.worldId())) {
-                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now);
+                state.reset(profile.worldId(), x, z, yaw, rotationChanged, now, requiredTurns);
                 return;
             }
 
@@ -229,7 +246,7 @@ public final class BaritoneACheck implements Listener {
 
                 if (matched) {
                     state.turns.addLast(new BaritoneASteeringAnalyzer.TurnSample(
-                            turn, yawTurn, segmentDistance));
+                            turn, yawTurn, segmentDistance, now));
                     pruneOldTurns(state, now);
 
                     List<BaritoneASteeringAnalyzer.TurnSample> recent =
@@ -354,12 +371,12 @@ public final class BaritoneACheck implements Listener {
         private boolean hasDirection;
 
         private PacketState(UUID worldId, double x, double z, float yaw,
-                            boolean rotationChanged, long now) {
-            reset(worldId, x, z, yaw, rotationChanged, now);
+                            boolean rotationChanged, long now, int initialRequiredTurns) {
+            reset(worldId, x, z, yaw, rotationChanged, now, initialRequiredTurns);
         }
 
         private void reset(UUID worldId, double x, double z, float yaw,
-                           boolean rotationChanged, long now) {
+                           boolean rotationChanged, long now, int initialRequiredTurns) {
             this.worldId = worldId;
             lastX = x;
             lastZ = z;
@@ -370,7 +387,7 @@ public final class BaritoneACheck implements Listener {
             lastPacketNanos = now;
             turns.clear();
             violationLevel = 0;
-            nextAlertAtTurns = requiredTurns;
+            nextAlertAtTurns = initialRequiredTurns;
             hasYaw = rotationChanged;
             hasDirection = false;
         }
