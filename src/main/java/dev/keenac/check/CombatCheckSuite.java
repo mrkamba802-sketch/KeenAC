@@ -126,7 +126,7 @@ public final class CombatCheckSuite extends PacketListenerAbstract implements Li
                     state.attackIntervals.addLast(interval / 1_000_000.0);
                     while (state.attackIntervals.size() > CheckSettings.integer(plugin, "combat.autoclicker", "sample-size", 32)) state.attackIntervals.removeFirst();
                     reviewAutoclicker(attacker, state);
-                } else if (interval > 500_000_000L) {
+                } else if (interval > CheckSettings.millisNanos(plugin, "combat.autoclicker", "max-interval-ms", 500L)) {
                     state.attackIntervals.clear();
                 }
             }
@@ -401,8 +401,7 @@ public final class CombatCheckSuite extends PacketListenerAbstract implements Li
         // KeenAC Fast Heal A is explicitly protocol-gated to legacy 1.6–1.8
         // clients (protocol 5–107), so it must not run by default on 1.21.4.
         boolean defaultEnabled = !"fast-heal".equals(check);
-        return plugin.getConfig().getBoolean(
-                "checks.checks.combat." + check + ".enabled", defaultEnabled);
+        return CheckSettings.enabled(plugin, "combat." + check, defaultEnabled);
     }
 
     private void flag(Player player, String check, String reason) {
