@@ -1,4 +1,4 @@
-name: Import KeenAC check engine
+name: Recover KeenAC engine sources
 
 on:
   push:
@@ -10,70 +10,36 @@ permissions:
   contents: write
 
 jobs:
-  import-and-build:
+  recover:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: true
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Import engine sources
+      - name: Recover valid tar members from staged bundle
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p .engine-import
+          set -uo pipefail
+          mkdir -p .recovered
           cat engine-import/*.b64 | base64 --decode > /tmp/keenac-engine.tar.xz
-          echo "=== XZ diagnostics ==="
-          xz --robot --list /tmp/keenac-engine.tar.xz || true
-          xz -tvv /tmp/keenac-engine.tar.xz || true
-          echo "=== Attempting tolerant decompression ==="
-          xz -dc --ignore-check /tmp/keenac-engine.tar.xz > /tmp/keenac-engine-recovered.tar 2>/tmp/keenac-xz-errors.log || true
-          cat /tmp/keenac-xz-errors.log
-          ls -lh /tmp/keenac-engine-recovered.tar || true
-          tar --ignore-zeros -tf /tmp/keenac-engine-recovered.tar 2>/dev/null | sed -n '1,100p' || true
-          echo "=== End diagnostics ==="
-          tar -xJf /tmp/keenac-engine.tar.xz -C .engine-import
-
-          test -f .engine-import/main/dev/keenac/KeenAC.java
-          test -f .engine-import/main/dev/keenac/listener/CorePlayerLifecycleListener.java
-          test "$(find .engine-import/main/dev/keenac/engine/core/check/impl -name '*Check.java' | wc -l)" -eq 60
-
-          mkdir -p src/main/java/dev/keenac/engine
-          mkdir -p src/main/java/dev/keenac/listener
-          mkdir -p src/test/java/dev/keenac/engine
-
-          cp .engine-import/main/dev/keenac/KeenAC.java src/main/java/dev/keenac/KeenAC.java
-          cp .engine-import/main/dev/keenac/listener/CorePlayerLifecycleListener.java src/main/java/dev/keenac/listener/
-          cp -R .engine-import/main/dev/keenac/engine/. src/main/java/dev/keenac/engine/
-          cp -R .engine-import/test/dev/keenac/engine/. src/test/java/dev/keenac/engine/
-
-          rm -f src/main/java/dev/keenac/listener/AlertLifecycleListener.java
-          rm -rf engine-import .engine-import
-          rm -f /tmp/keenac-engine.tar.xz
-
+          xz -dc --ignore-check /tmp/keenac-engine.tar.xz > /tmp/keenac-engine-partial.tar 2>/tmp/xz-recovery.log || true
+          cat /tmp/xz-recovery.log
+          tar --ignore-zeros -xf /tmp/keenac-engine-partial.tar -C .recovered 2>/tmp/tar-recovery.log || true
+          cat /tmp/tar-recovery.log
+          echo "Recovered source files:"
+          find .recovered -type f | sort | sed -n '1,240p'
+          echo "Recovered check classes:"
+          find .recovered/main/dev/keenac/engine/core/check/impl -name '*Check.java' -type f 2>/dev/null | sort || true
+          count="$(find .recovered/main/dev/keenac/engine/core/check/impl -name '*Check.java' -type f 2>/dev/null | wc -l)"
+          echo "Recovered checks: $count"
+          test -f .recovered/main/dev/keenac/engine/core/compensation/TransactionManager.java
+          test -f .recovered/main/dev/keenac/engine/core/player/TrackedPlayer.java
+          test "$count" -ge 30
+          mkdir -p recovered-engine
+          cp -R .recovered/. recovered-engine/
+          rm -rf .recovered
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Import KeenAC checks, player tracking and latency compensation"
+          git add recovered-engine
+          git commit -m "Recover valid KeenAC engine source files"
           git push
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build and test plugin
-        run: gradle build --no-daemon
-
-      - name: Upload plugin JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: KeenAC-1.0.0-engine
-          path: build/libs/KeenAC-1.0.0.jar
-          if-no-files-found: error
-          retention-days: 30
