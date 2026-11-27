@@ -21,7 +21,8 @@ checks:
       macro:
         enabled: true
       fast-heal:
-        enabled: true
+        # Windfall Fast Heal A supports legacy protocols 5-107 only.
+        enabled: false
       crystal:
         enabled: true
       criticals:
