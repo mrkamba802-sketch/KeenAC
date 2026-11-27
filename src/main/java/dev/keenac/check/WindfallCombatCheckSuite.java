@@ -3,23 +3,22 @@ package dev.keenac.check;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -51,6 +50,27 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
     public WindfallCombatCheckSuite(KeenAC plugin) {
         super(PacketListenerPriority.NORMAL);
         this.plugin = plugin;
+    }
+
+    @Override
+    public void onPacketSend(PacketSendEvent event) {
+        if (!(event.getPlayer() instanceof Player player)
+                || event.getPacketType() != PacketType.Play.Server.SPAWN_ENTITY) return;
+        WrapperPlayServerSpawnEntity packet = new WrapperPlayServerSpawnEntity(event);
+        if (packet.getEntityType() != EntityTypes.END_CRYSTAL) return;
+
+        UUID id = player.getUniqueId();
+        int entityId = packet.getEntityId();
+        long now = System.nanoTime();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player online = Bukkit.getPlayer(id);
+            if (online == null || !online.isOnline()) return;
+            CombatState state = state(online);
+            state.crystalSpawnTimes.put(entityId, now);
+            state.lastCrystalSpawnNanos = now;
+            state.crystalSpawnTimes.entrySet().removeIf(entry ->
+                    now - entry.getValue() > 5_000_000_000L);
+        });
     }
 
     @Override
@@ -132,6 +152,30 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         // Self Interact: the player's own entity id is never a valid attack target.
         if (enabled("self-interact") && targetId == attacker.getEntityId()) {
             flag(attacker, "Self Interact", "Attack packet targeted the sender's own entity id.");
+        }
+
+        if (enabled("crystal")) {
+            Long spawnedAt = state.crystalSpawnTimes.get(targetId);
+            if (spawnedAt != null && now - spawnedAt >= 0L
+                    && now - spawnedAt < 50_000_000L) {
+                flag(attacker, "Crystal", "Attack targeted an end crystal during its spawn tick (entity-id prediction review).");
+            }
+
+            // Fast place-break is evaluated against any attack immediately after
+            // an end-crystal spawn packet, matching Windfall's two-signal model.
+            if (state.lastCrystalSpawnNanos != 0L
+                    && now - state.lastCrystalSpawnNanos >= 0L
+                    && now - state.lastCrystalSpawnNanos < 100_000_000L) {
+                state.crystalFastBreakFlags++;
+                if (state.crystalFastBreakFlags >= 2) {
+                    flag(attacker, "Crystal", "Repeated attacks occurred within 100 ms of an end-crystal spawn.");
+                    state.crystalFastBreakFlags = 0;
+                }
+            } else {
+                state.crystalFastBreakFlags = Math.max(0, state.crystalFastBreakFlags - 1);
+            }
+            state.crystalSpawnTimes.entrySet().removeIf(entry ->
+                    now - entry.getValue() > 5_000_000_000L);
         }
 
         Entity target = findEntity(attacker, targetId);
@@ -350,26 +394,6 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onCrystalDamage(EntityDamageByEntityEvent event) {
-        if (!enabled("crystal") || !(event.getEntity() instanceof EnderCrystal)
-                || !(event.getDamager() instanceof Player player)) return;
-        CombatState state = state(player);
-        long now = System.nanoTime();
-        long sincePlace = now - state.lastCrystalPlaceNanos;
-        if (sincePlace >= 0L && sincePlace < 70_000_000L) {
-            flag(player, "Crystal", "End crystal was attacked almost immediately after a placement by the same player.");
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onCrystalPlace(PlayerInteractEvent event) {
-        if (!enabled("crystal") || event.getHand() != EquipmentSlot.HAND
-                || event.getItem() == null
-                || event.getItem().getType() != org.bukkit.Material.END_CRYSTAL) return;
-        state(event.getPlayer()).lastCrystalPlaceNanos = System.nanoTime();
-    }
-
     private boolean enabled(String check) {
         return plugin.getConfig().getBoolean("checks.windfall.combat." + check + ".enabled", true);
     }
@@ -411,13 +435,15 @@ public final class WindfallCombatCheckSuite extends PacketListenerAbstract imple
         private long auraWindowStart;
         private long attackWindowStart;
         private long lastConsumeNanos;
-        private long lastCrystalPlaceNanos;
+        private long lastCrystalSpawnNanos;
+        private final Map<Integer, Long> crystalSpawnTimes = new ConcurrentHashMap<>();
         private int autoclickerWindows;
         private int backtrackHits;
         private int hitboxHits;
         private int badCursorInteractions;
         private int macroRepeats;
         private int invalidCriticalAttacks;
+        private int crystalFastBreakFlags;
         private int auraWindows;
         private int fastConsumes;
     }
