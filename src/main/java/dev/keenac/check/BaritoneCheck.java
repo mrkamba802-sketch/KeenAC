@@ -188,7 +188,7 @@ public final class BaritoneCheck implements Listener {
                 states.put(id, new PacketState(profile.worldId(), x, z, yaw, rotationChanged, now));
                 return;
             }
-            if (now - state.lastPacketNanos > 350_000_000L
+            if (now - state.lastPacketNanos > 1_200_000_000L
                     || now <= state.lastPacketNanos) {
                 state.reset(x, z, yaw, rotationChanged, now);
                 return;
