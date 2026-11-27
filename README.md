@@ -1,29 +1,32 @@
 # KeenAC 1.0.0
 
-KeenAC is currently a clean core shell for a future anti-cheat integration. **No detection checks are included or registered.** This keeps the alert, evidence and player-context systems available while check implementations are being replaced.
+KeenAC includes 60 combat, movement, packet and inventory checks backed by shared player/world state, version-aware movement models and latency compensation.
 
-## Core features
+## Core detection architecture
 
-- Staff alert preferences and configurable alert formatting/cooldowns.
-- Bounded in-memory evidence history with player context snapshots.
+- **Player tracking:** one per-player state model tracks positions, velocities, ground state, actions, attributes and potion effects.
+- **World tracking:** compensated block/entity snapshots, world transitions, ghost-block resolution and deferred changes keep checks aligned with the server timeline.
+- **Latency compensation:** modern Ping/Pong transaction probes estimate RTT and one-way delay; bounded history is used for target and world rewind.
+- **Version mechanics:** physics and attribute snapshots are selected for the connected protocol and server version, including movement, Elytra, sprint, mining and reach-related attributes.
+- **Compatibility:** protocol, server-fork, plugin and Bedrock compatibility gates can disable checks where the engine cannot make a reliable comparison.
+
+All detections are sent through KeenAC's existing alert and evidence services. Automatic punishments and setback teleports are disabled in this integration. The engine is not capable of guaranteeing zero false positives; production thresholds still require monitoring and tuning on the target server.
+
+## Core commands
+
 - `/keenac alerts` — toggle staff notifications.
-- `/keenac review <player>` — review the latest evidence records.
-- `/keenac reload` — reload core configuration.
-
-The alert API remains available through `KeenAC#getAlertManager().send(checkName, player, violationLevel, reason)`. Evidence can also be added through `KeenAC#getEvidenceManager()`. No automatic punishment or detection logic is part of this core.
+- `/keenac review <player>` — review recent evidence and player context.
+- `/keenac reload` — reload check enablement and per-check settings.
 
 ## Configuration
 
-Only the core systems remain in `config.yml`:
-
-- `alerts` — enablement, cooldown, console output, message format and automatic staff opt-in.
-- `evidence` — enablement and in-memory history limits.
-- `commands` — permission nodes.
+Core notifications and evidence remain in `config.yml` under `alerts` and `evidence`. Individual checks have independent enablement, max-VL, punishment (forced off) and optional decay/setback thresholds under `checks.keenac`. Shared check defaults are under `checks.default`. Additional engine settings include latency, adaptive thresholds, Bedrock compatibility and check behavior.
 
 ## Compatibility and build
 
 - Paper / Purpur 1.21.4+.
 - Java 21.
-- Run `gradle test` for regression tests or `gradle build` to build `build/libs/KeenAC-1.0.0.jar`.
+- PacketEvents 2.14.x is required.
+- Run `gradle test` or `gradle build` with JDK 21. Output: `build/libs/KeenAC-1.0.0.jar`.
 
-The project no longer requires PacketEvents while it contains no packet-based checks. Add the dependency back when the next check implementation requires it.
+Folia is explicitly detected and this build disables itself safely rather than reading Bukkit state from unsupported scheduler contexts.

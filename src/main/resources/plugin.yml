@@ -3,7 +3,8 @@ version: '${version}'
 main: dev.keenac.KeenAC
 api-version: '1.21'
 authors: [MrKamba, Its_Ronex]
-description: KeenAC alerts, evidence history and player context core.
+description: KeenAC modular detection engine with player/world tracking and latency compensation.
+depend: [packetevents]
 commands:
   keenac:
     description: KeenAC administration commands
