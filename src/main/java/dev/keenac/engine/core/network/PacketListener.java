@@ -275,7 +275,12 @@ public class PacketListener extends PacketListenerAbstract {
         }
     }
     private void handleLogin(Player player, User user) {
-        if (playerManager.get(player.getUniqueId()) != null || user == null) return;
+        if (user == null) return;
+        TrackedPlayer existing = playerManager.get(player.getUniqueId());
+        if (existing != null) {
+            checkManager.onPlayerLogin(existing);
+            return;
+        }
         TrackedPlayer tracked = new TrackedPlayer(player, user);
         playerManager.add(tracked);
         ClientVersion version = user.getClientVersion();
@@ -288,6 +293,7 @@ public class PacketListener extends PacketListenerAbstract {
             BedrockInfo bedrockInfo = geyserManager.getBedrockInfo(player.getUniqueId());
             if (bedrockInfo != null) tracked.setBedrockInfo(bedrockInfo);
         }
+        checkManager.onPlayerLogin(tracked);
     }
     private void trackEntities(PacketSendEvent event, PacketTypeCommon type, Player viewer) {
         try {
