@@ -327,6 +327,16 @@ public class TrackedPlayer {
         return total;
     }
     public void updateCachedState() {
+        // Keep movement attributes synchronized with authoritative Bukkit player state.
+        // Packet physics checks must not silently treat a sprinting player as walking.
+        try {
+            this.sprinting = player.isSprinting();
+            this.setSneaking(player.isSneaking());
+            this.swimming = player.isSwimming();
+            this.flying = player.isFlying();
+        } catch (Exception ignored) {
+            // Retain the last known movement state if the player is leaving the server.
+        }
         try {
             this.attributeSnapshot = AttributeSnapshot.capture(player);
         } catch (Exception ignored) {
@@ -346,7 +356,7 @@ public class TrackedPlayer {
         }
         try {
             this.cachedSpeedMultiplier = computePotionMultiplier("SPEED", 0.20, 5);
-            this.cachedSlownessMultiplier = computePotionMultiplier("SLOW", -0.15, 4);
+            this.cachedSlownessMultiplier = computeSlownessMultiplier();
             this.cachedHasSlowFalling = hasPotionEffect("SLOW_FALLING");
             this.cachedHasLevitation = hasPotionEffect("LEVITATION");
             this.cachedLevitationAmplifier = getPotionAmplifier("LEVITATION");
@@ -369,10 +379,20 @@ public class TrackedPlayer {
     }
     private double computePotionMultiplier(String nameContains, double perLevel, int maxLevel) {
         for (org.bukkit.potion.PotionEffect effect : player.getActivePotionEffects()) {
-            String effectName = effect.getType().getName().toUpperCase();
-            if (effectName.contains(nameContains)) {
+            String effectName = effect.getType().getName().toUpperCase(java.util.Locale.ROOT);
+            if (effectName.equals(nameContains)) {
                 int level = Math.min(effect.getAmplifier() + 1, maxLevel);
                 return 1.0 + (perLevel * level);
+            }
+        }
+        return 1.0;
+    }
+    private double computeSlownessMultiplier() {
+        for (org.bukkit.potion.PotionEffect effect : player.getActivePotionEffects()) {
+            String effectName = effect.getType().getName().toUpperCase(java.util.Locale.ROOT);
+            if (effectName.equals("SLOW") || effectName.equals("SLOWNESS")) {
+                int level = Math.min(effect.getAmplifier() + 1, 4);
+                return 1.0 - (0.15 * level);
             }
         }
         return 1.0;
