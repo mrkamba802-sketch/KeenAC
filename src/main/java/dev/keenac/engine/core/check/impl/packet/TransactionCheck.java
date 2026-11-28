@@ -1,100 +1,61 @@
 package dev.keenac.engine.core.check.impl.packet;
+
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import dev.keenac.KeenAC;
 import dev.keenac.engine.core.check.Check;
 import dev.keenac.engine.core.check.CheckData;
 import dev.keenac.engine.core.check.CompatFlag;
 import dev.keenac.engine.core.check.type.PacketCheck;
 import dev.keenac.engine.core.compensation.TransactionManager;
 import dev.keenac.engine.core.player.TrackedPlayer;
-import dev.keenac.engine.core.util.PacketClock;
-import dev.keenac.KeenAC;
+
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Transaction probes provide latency/confirmation data to the compensation engine.
+ * A missing response alone is not proof of cheating: packet loss, client stalls,
+ * overloaded servers and high latency all delay legitimate responses.
+ */
 @CheckData(
-    name = "Transaction A",
-    stableKey = "keenac.packet.transaction",
-    decay = 0.005,
-    setbackVl = 15,
-    compat = {CompatFlag.RELAX_ON_MISMATCH},
-    relaxMultiplier = 1.3
+        name = "Transaction A",
+        stableKey = "keenac.packet.transaction",
+        decay = 0.005,
+        setbackVl = 15,
+        compat = {CompatFlag.RELAX_ON_MISMATCH},
+        relaxMultiplier = 1.3
 )
 public class TransactionCheck extends Check implements PacketCheck {
-    private static final int SKIP_THRESHOLD = 10;
-    private static final int UNKNOWN_THRESHOLD = 5;
-    private static final long WINDOW_MS = 5000;
-    private static final long MIN_SKIP_TIMEOUT_MS = 2000L;
-    private static final long SKIP_TIMEOUT_BASE_MS = 1000L;
-    private static final class PlayerState {
-        volatile int skippedInWindow;
-        volatile int unknownInWindow;
-        volatile long windowStart;
-    }
-    private final ConcurrentHashMap<UUID, PlayerState> stateMap = new ConcurrentHashMap<>();
-    private PlayerState getState(TrackedPlayer player) {
-        return stateMap.computeIfAbsent(player.getUuid(), k -> new PlayerState());
-    }
+    private static final long MIN_PROBE_TIMEOUT_MS = 15_000L;
+
     @Override
     public void removePlayer(UUID uuid) {
-        stateMap.remove(uuid);
     }
+
     @Override
     public void onPacketReceive(TrackedPlayer player, PacketReceiveEvent event) {
     }
+
     @Override
     public void onPacketSend(TrackedPlayer player, PacketSendEvent event) {
     }
+
     public void onTransactionResponse(TrackedPlayer player, boolean matched) {
-        if (matched) return;
-        PlayerState state = getState(player);
-        resetWindowIfNeeded(state);
-        state.unknownInWindow++;
-        evaluatePlayer(player, state);
+        // Response accounting is performed by TransactionManager and PingPongManager.
+        // Unknown/late transaction IDs are not independently attributable to a cheat.
     }
+
     public void onTick(TrackedPlayer player) {
         KeenAC plugin = KeenAC.getInstance();
         if (plugin == null) return;
-        TransactionManager txManager = plugin.getTransactionManager();
-        if (txManager == null) return;
-        PlayerState state = getState(player);
-        resetWindowIfNeeded(state);
-        state.skippedInWindow += txManager.sweepTimedOutTransactions(
-                player.getUuid(), getSkipTimeoutMs(player));
-        evaluatePlayer(player, state);
-    }
-    private long getSkipTimeoutMs(TrackedPlayer player) {
-        int ping = player.getTransactionPing();
-        long base = Math.max(MIN_SKIP_TIMEOUT_MS, (long) (ping * 3) + SKIP_TIMEOUT_BASE_MS);
-        return player.isBedrock() ? base * 2 : base;
-    }
-    private void evaluatePlayer(TrackedPlayer player, PlayerState state) {
-        int totalAnomalies = state.skippedInWindow + state.unknownInWindow;
-        if (state.skippedInWindow >= SKIP_THRESHOLD) {
-            increaseBuffer(player, 1.5);
-            if (getBuffer(player) > 4.0) {
-                flag(player);
-                resetBuffer(player);
-                state.skippedInWindow = 0;
-                state.unknownInWindow = 0;
-            }
-        } else if (state.unknownInWindow >= UNKNOWN_THRESHOLD) {
-            increaseBuffer(player, 2.0);
-            if (getBuffer(player) > 3.0) {
-                flag(player);
-                resetBuffer(player);
-                state.skippedInWindow = 0;
-                state.unknownInWindow = 0;
-            }
-        } else if (totalAnomalies == 0) {
-            decreaseBuffer(player, 0.2);
-        }
-    }
-    private void resetWindowIfNeeded(PlayerState state) {
-        long now = PacketClock.currentTimeMillis();
-        if (state.windowStart == 0 || now - state.windowStart > WINDOW_MS) {
-            state.skippedInWindow = 0;
-            state.unknownInWindow = 0;
-            state.windowStart = now;
-        }
+        TransactionManager manager = plugin.getTransactionManager();
+        if (manager == null) return;
+
+        int ping = Math.max(0, player.getTransactionPing());
+        long timeout = Math.max(MIN_PROBE_TIMEOUT_MS, (long) ping * 4L + 5_000L);
+        if (player.isBedrock()) timeout *= 2L;
+
+        // Keep the probe queue bounded without generating violation levels from timeouts.
+        manager.sweepTimedOutTransactions(player.getUuid(), timeout);
     }
 }
