@@ -530,6 +530,11 @@ public final class MotionCheck implements Listener {
                 Math.max(-90.0f, Math.min(90.0f, pitch))));
     }
 
+    /**
+     * Receives absolute client positions. The legacy rolling speed window remains
+     * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
+     * adds a second independent signal using Paper collision shapes.
+     */
     public void recordPacketMovement(UUID id, double x, double y, double z, boolean packetOnGround) {
         MotionPacketProfile profile = motionPacketProfiles.get(id);
         if (profile == null || !profile.eligible || profile.ping > motionPacketMaxPing) {
@@ -747,11 +752,6 @@ public final class MotionCheck implements Listener {
         return null;
     }
 
-    /**
-     * Receives absolute client positions. The legacy rolling speed window remains
-     * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
-     * adds a second independent signal using Paper collision shapes.
-     */
     private record MotionPacketProfile(
             boolean eligible,
             boolean speedEligible,
