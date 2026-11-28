@@ -88,9 +88,8 @@ class MovementPhysicsTest {
         MovementInput forward = new MovementInput(
                 true, false, false, false, false, false, false, 1L);
 
-        MovementPhysicsSimulator.Result result = MovementPhysicsSimulator.simulate(
-                initial, forward, mechanics,
-                MovementPhysics.profile(mechanics, 100, 64.0), 60);
+        MovementPhysicsSimulator.Result result = simulateRepeated(
+                initial, forward, mechanics, 60);
 
         assertTrue(result.state().z() > 10.0);
         assertEquals(4.317 / 20.0, result.state().velocityZ(), 0.002);
@@ -107,12 +106,28 @@ class MovementPhysicsTest {
         MovementInput right = new MovementInput(
                 false, false, false, true, false, false, false, 1L);
 
-        MovementPhysicsSimulator.Result result = MovementPhysicsSimulator.simulate(
-                initial, right, mechanics,
-                MovementPhysics.profile(mechanics, 100, 64.0), 60);
+        MovementPhysicsSimulator.Result result = simulateRepeated(
+                initial, right, mechanics, 60);
 
         assertTrue(result.collidedHorizontally());
         assertTrue(result.state().x() <= 0.700001);
+    }
+
+    private MovementPhysicsSimulator.Result simulateRepeated(
+            MovementState initial, MovementInput input, MechanicsSnapshot mechanics, int ticks
+    ) {
+        MovementPhysics.Profile profile = MovementPhysics.profile(mechanics, 100, 64.0);
+        MovementState state = initial;
+        boolean horizontalCollision = false;
+        boolean verticalCollision = false;
+        for (int tick = 0; tick < ticks; tick++) {
+            MovementPhysicsSimulator.Result result = MovementPhysicsSimulator.simulate(
+                    state, input, mechanics, profile, 1);
+            state = result.state();
+            horizontalCollision |= result.collidedHorizontally();
+            verticalCollision |= result.collidedVertically();
+        }
+        return new MovementPhysicsSimulator.Result(state, horizontalCollision, verticalCollision);
     }
 
     private MechanicsSnapshot simulationSnapshot(
