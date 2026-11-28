@@ -13,6 +13,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
@@ -50,6 +52,7 @@ public final class MechanicsEngine implements Listener {
     private final Map<UUID, Long> lastDamageNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastItemChangeNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastGlideChangeNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, CachedWorldSnapshot> worldSnapshotCache = new ConcurrentHashMap<>();
 
     public MechanicsEngine(KeenAC plugin) {
         this.plugin = plugin;
@@ -230,6 +233,19 @@ public final class MechanicsEngine implements Listener {
 
     private WorldMechanicsSnapshot captureWorld(Player player, Location location) {
         World world = location.getWorld();
+        int centerX = floor(location.getX());
+        int centerY = floor(location.getY());
+        int centerZ = floor(location.getZ());
+        long nowNanos = System.nanoTime();
+        UUID playerId = player.getUniqueId();
+        CachedWorldSnapshot cached = worldSnapshotCache.get(playerId);
+        if (cached != null && cached.worldName().equals(world.getName())
+                && cached.centerX() == centerX && cached.centerY() == centerY
+                && cached.centerZ() == centerZ
+                && nowNanos - cached.capturedAtNanos() < 100_000_000L) {
+            return cached.snapshot();
+        }
+
         BoundingBox liveBox = player.getBoundingBox();
         double height = Math.max(1.0, Math.min(3.0,
                 liveBox.getMaxY() - liveBox.getMinY()));
@@ -269,9 +285,6 @@ public final class MechanicsEngine implements Listener {
         // Capture nearby precise collision shapes for a short movement horizon.
         // The three-block-wide horizontal area covers ordinary one-tick motion
         // and the step-up attempt without loading chunks on behalf of the check.
-        int centerX = floor(location.getX());
-        int centerY = floor(location.getY());
-        int centerZ = floor(location.getZ());
         java.util.List<CollisionBox> collisions = new java.util.ArrayList<>();
         for (int x = centerX - 1; x <= centerX + 1; x++) {
             for (int y = centerY - 1; y <= centerY + 2; y++) {
@@ -316,10 +329,32 @@ public final class MechanicsEngine implements Listener {
             }
         }
 
-        return new WorldMechanicsSnapshot(world.getName(), below, feet, head,
+        WorldMechanicsSnapshot snapshot = new WorldMechanicsSnapshot(world.getName(), below, feet, head,
                 intersecting, water, powderSnow, climbing, cobweb, complete,
                 collisions, slipperiness);
+        worldSnapshotCache.put(playerId, new CachedWorldSnapshot(
+                world.getName(), centerX, centerY, centerZ, nowNanos, snapshot));
+        return snapshot;
     }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        worldSnapshotCache.clear();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        worldSnapshotCache.clear();
+    }
+
+    private record CachedWorldSnapshot(
+            String worldName,
+            int centerX,
+            int centerY,
+            int centerZ,
+            long capturedAtNanos,
+            WorldMechanicsSnapshot snapshot
+    ) { }
 
     private String readBlock(World world, int x, int y, int z) {
         if (y < world.getMinHeight() || y >= world.getMaxHeight()) return "OUT_OF_WORLD";
@@ -412,6 +447,7 @@ public final class MechanicsEngine implements Listener {
         lastDamageNanos.remove(id);
         lastItemChangeNanos.remove(id);
         lastGlideChangeNanos.remove(id);
+        worldSnapshotCache.remove(id);
     }
 
     public void clearAll() {
@@ -420,5 +456,6 @@ public final class MechanicsEngine implements Listener {
         lastDamageNanos.clear();
         lastItemChangeNanos.clear();
         lastGlideChangeNanos.clear();
+        worldSnapshotCache.clear();
     }
 }

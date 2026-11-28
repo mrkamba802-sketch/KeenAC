@@ -479,11 +479,6 @@ public final class MotionCheck implements Listener {
                 (float) location.getYaw()));
     }
 
-    /**
-     * Receives absolute client position samples from PacketEvents. Horizontal
-     * speed covers both direct Speed movement and accelerated strafe/bunny-hop
-     * movement; sustained near-zero vertical displacement remains the Hover signal.
-     */
     /** Store client input values from PacketEvents; this method is network-thread safe. */
     public void recordPlayerInput(
             UUID id, boolean forward, boolean backward, boolean left, boolean right,
@@ -610,7 +605,10 @@ public final class MotionCheck implements Listener {
             long elapsedNanos
     ) {
         if (!profile.predictionEligible || input == null || !packetOnGround
-                || !state.lastPacketOnGround || !profile.mechanics.world().chunkDataComplete()) {
+                || !state.lastPacketOnGround || !profile.mechanics.world().chunkDataComplete()
+                || input.jump()
+                || input.sprint() != profile.mechanics.sprinting()
+                || input.sneak() != profile.mechanics.sneaking()) {
             state.clearPrediction();
             return null;
         }
