@@ -11,10 +11,19 @@ repositories {
         name = "papermc"
         url = uri("https://repo.papermc.io/repository/maven-public/")
     }
+    maven {
+        name = "codemc-releases"
+        url = uri("https://repo.codemc.io/repository/maven-releases/")
+    }
+    maven {
+        name = "codemc-snapshots"
+        url = uri("https://repo.codemc.io/repository/maven-snapshots/")
+    }
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    compileOnly("com.github.retrooper:packetevents-spigot:2.14.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
 }
 
