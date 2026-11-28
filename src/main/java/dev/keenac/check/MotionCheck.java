@@ -463,10 +463,10 @@ public final class MotionCheck implements Listener {
                 && !mechanics.world().inCobweb()
                 && mechanics.world().chunkDataComplete()
                 && !mechanics.hasPotionEffect("jump_boost")
-                && mechanics.velocityAgeMs() >= 350L
-                && mechanics.damageAgeMs() >= 500L
-                && mechanics.teleportAgeMs() >= 500L
-                && mechanics.itemChangeAgeMs() >= 250L
+                && ageAllowsPrediction(mechanics.velocityAgeMs(), 350L)
+                && ageAllowsPrediction(mechanics.damageAgeMs(), 500L)
+                && ageAllowsPrediction(mechanics.teleportAgeMs(), 500L)
+                && ageAllowsPrediction(mechanics.itemChangeAgeMs(), 250L)
                 && player.getPing() <= Math.min(motionPacketMaxPing, 200);
         motionPacketProfiles.put(id, new MotionPacketProfile(
                 enabled && movementModeEligible,
@@ -494,6 +494,10 @@ public final class MotionCheck implements Listener {
                 forward, backward, left, right, jump, sneak, sprint, System.nanoTime()));
     }
 
+    private boolean ageAllowsPrediction(long ageMillis, long requiredMillis) {
+        return ageMillis < 0L || ageMillis >= requiredMillis;
+    }
+
     /**
      * Receives absolute client positions. The legacy rolling speed window remains
      * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
@@ -519,6 +523,7 @@ public final class MotionCheck implements Listener {
             long elapsedNanos = nowNanos - state.lastPacketNanos;
             if (elapsedNanos <= 0L) return;
 
+            double previousY = state.lastY;
             String predictionReason = evaluatePrediction(
                     state, profile, movementInputs.get(id), x, y, z,
                     packetOnGround, nowNanos, elapsedNanos);
@@ -572,7 +577,7 @@ public final class MotionCheck implements Listener {
             }
 
             if (reason == null && profile.hoverEligible && !packetOnGround
-                    && Math.abs(y - state.lastY) <= 0.015
+                    && Math.abs(y - previousY) <= 0.015
                     && Math.abs(profile.verticalVelocity) <= 0.035) {
                 if (state.hoverSinceNanos == 0L) {
                     state.hoverSinceNanos = nowNanos;
@@ -610,12 +615,6 @@ public final class MotionCheck implements Listener {
             return null;
         }
 
-        // Input state persists until another PlayerInput packet arrives. A very
-        // long pause is treated as unknown instead of guessing at stale controls.
-        if (nowNanos - input.receivedAtNanos() > 2_000_000_000L) {
-            state.clearPrediction();
-            return null;
-        }
         if (elapsedNanos < 35_000_000L || elapsedNanos > 125_000_000L) {
             state.clearPrediction();
             return null;
@@ -1221,6 +1220,7 @@ public final class MotionCheck implements Listener {
         hoveringTicks.remove(id);
         motionPacketProfiles.remove(id);
         motionPacketStates.remove(id);
+        movementInputs.remove(id);
         violationLevels.remove(id);
         lastSignalTick.remove(id);
     }
@@ -1238,6 +1238,7 @@ public final class MotionCheck implements Listener {
         elytraPacketStates.clear();
         elytraGlidingPlayers.clear();
         elytraPing.clear();
+        movementInputs.clear();
         elytraViolationLevels.clear();
         pendingSetbacks.clear();
         pendingElytraSetbacks.clear();
