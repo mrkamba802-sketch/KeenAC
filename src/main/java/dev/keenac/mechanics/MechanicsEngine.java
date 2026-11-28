@@ -393,17 +393,23 @@ public final class MechanicsEngine implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

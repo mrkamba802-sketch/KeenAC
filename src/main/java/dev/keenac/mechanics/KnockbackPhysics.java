@@ -55,8 +55,7 @@ public final class KnockbackPhysics {
         public boolean isFinite() {
             return Double.isFinite(velocityX)
                     && Double.isFinite(velocityY)
-                    && Double.isFinite(velocityZ)
-                    && timestampNanos >= 0L;
+                    && Double.isFinite(velocityZ);
         }
     }
 }

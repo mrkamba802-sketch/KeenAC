@@ -521,11 +521,6 @@ public final class MotionCheck implements Listener {
     }
 
     /**
-     * Receives absolute client positions. The legacy rolling speed window remains
-     * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
-     * adds a second independent signal using Paper collision shapes.
-     */
-    /**
      * Store the latest client camera rotation. Rotation-only packets update this
      * state and the values remain valid until the next rotation packet.
      */
@@ -752,6 +747,11 @@ public final class MotionCheck implements Listener {
         return null;
     }
 
+    /**
+     * Receives absolute client positions. The legacy rolling speed window remains
+     * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
+     * adds a second independent signal using Paper collision shapes.
+     */
     private record MotionPacketProfile(
             boolean eligible,
             boolean speedEligible,
@@ -780,6 +780,7 @@ public final class MotionCheck implements Listener {
         private double lastZ;
         private boolean lastPacketOnGround;
         private float packetYaw;
+        private float packetPitch;
         private boolean hasPacketRotation;
         private MovementState predictedState;
         private long lastPredictionNanos;
@@ -797,6 +798,7 @@ public final class MotionCheck implements Listener {
             lastZ = z;
             lastPacketOnGround = onGround;
             packetYaw = fallbackYaw;
+            packetPitch = 0.0f;
             hasPacketRotation = false;
             hoverSinceNanos = 0L;
             fastSamples = 0;
@@ -806,6 +808,7 @@ public final class MotionCheck implements Listener {
         private void updateRotation(PacketRotation rotation) {
             if (rotation == null) return;
             packetYaw = rotation.yaw();
+            packetPitch = rotation.pitch();
             hasPacketRotation = true;
         }
 
@@ -1254,6 +1257,13 @@ public final class MotionCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onVelocity(PlayerVelocityEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        MotionPacketState motionState = motionPacketStates.get(id);
+        if (motionState != null) {
+            synchronized (motionState) {
+                motionState.clearPrediction();
+                motionState.fastSamples = 0;
+            }
+        }
         if (plugin.getMovementSetbackManager().isCorrectionLocked(id)) {
             event.setVelocity(new Vector(0.0, 0.0, 0.0));
             return;

@@ -20,12 +20,16 @@ class KnockbackPhysicsTest {
                 0.01, 0.01, 0.0, now - 100_000_000L);
         KnockbackPhysics.Impulse invalid = new KnockbackPhysics.Impulse(
                 Double.NaN, 0.4, 0.0, now - 100_000_000L);
+        KnockbackPhysics.Impulse negativeClock = new KnockbackPhysics.Impulse(
+                0.35, 0.42, -0.10, -800_000_000L);
 
         assertTrue(KnockbackPhysics.isRecentImpulse(recent, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(old, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(weak, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(invalid, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(recent, now - 1L, 1200L, 0.06));
+        assertTrue(KnockbackPhysics.isRecentImpulse(
+                negativeClock, -500_000_000L, 1200L, 0.06));
     }
 
     @Test
