@@ -191,13 +191,20 @@ public final class CheckManager {
 
     public void reloadChecks() {
         plugin.getKeenACConfig().reload();
+        int protocol = plugin.getVersionManager().getProtocolVersion();
         for (Check check : checks) {
             String key = check.getStableKey();
-            check.setEnabled(plugin.getKeenACConfig().isCheckEnabled(key));
+            boolean compatible = protocol >= check.getMinVersion()
+                    && protocol <= check.getMaxVersion();
+            if (check.isDisableOnFolia() && plugin.getFoliaCompat().isFolia()) compatible = false;
+            if (check.isDisableOnPurpur() && plugin.getPurpurCompat().isPurpur()) compatible = false;
+            check.setEnabled(compatible && plugin.getKeenACConfig().isCheckEnabled(key));
             check.setMaxVl(plugin.getKeenACConfig().getCheckMaxVl(key));
             check.setPunishable(plugin.getKeenACConfig().isCheckPunishable(key));
-            check.setSetbackVl(plugin.getKeenACConfig().getCheckSetbackVl(key));
-            check.setDecay(plugin.getKeenACConfig().getCheckDecay(key));
+            check.setSetbackVl(plugin.getKeenACConfig().getCheckSetbackVl(
+                    key, check.getDefaultSetbackVl()));
+            check.setDecay(plugin.getKeenACConfig().getCheckDecay(
+                    key, check.getDefaultDecay()));
         }
     }
 
