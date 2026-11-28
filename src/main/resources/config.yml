@@ -279,6 +279,13 @@ checks:
     # retain a short best-effort signal for attacks immediately after a click.
     personal-inventory-click-grace-ms: 650
 
+# Shared mechanics model used by movement checks.
+# Potion levels are captured as amplifier + 1 and supported up to this limit.
+# Server attributes and equipment modifiers are sampled independently.
+mechanics:
+  potion-level-cap: 100
+  movement-attribute-cap: 64.0
+
 evidence:
   enabled: true
   # In-memory history is bounded to protect server memory.

@@ -1,6 +1,8 @@
 package dev.keenac.check;
 
 import dev.keenac.KeenAC;
+import dev.keenac.mechanics.MechanicsSnapshot;
+import dev.keenac.mechanics.MovementPhysics;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -147,9 +149,11 @@ public final class NoWebCheck implements Listener {
 
         // These movement modes have additional physics that this web-specific
         // horizontal/vertical envelope does not model reliably.
-        if (player.isInsideVehicle() || player.isInWater() || player.isSwimming()
-                || overlapsAlternativePhysicsBlock(player, from)
-                || overlapsAlternativePhysicsBlock(player, to)) {
+        MechanicsSnapshot fromMechanics = plugin.getMechanicsEngine().capture(player, from);
+        MechanicsSnapshot toMechanics = plugin.getMechanicsEngine().capture(player, to);
+        if (toMechanics.inVehicle() || toMechanics.inWater() || toMechanics.swimming()
+                || MovementPhysics.hasUnsupportedMovementSurface(fromMechanics.world())
+                || MovementPhysics.hasUnsupportedMovementSurface(toMechanics.world())) {
             // Powder snow, berry bushes, ladders, vines and scaffolding have
             // movement rules that can override or replace cobweb slowdown.
             states.remove(id);
@@ -171,7 +175,7 @@ public final class NoWebCheck implements Listener {
         }
 
         double elapsedTicks = getElapsedTicks(state, now);
-        double maxHorizontalDistance = getAllowedMoveDistance(player, elapsedTicks);
+        double maxHorizontalDistance = getAllowedMoveDistance(toMechanics, elapsedTicks);
         // NoWeb evaluates horizontal displacement only. Vertical movement inside
         // cobweb depends on entry momentum, gravity and potion physics; a fixed
         // vertical cap is too crude and creates false positives for legitimate falls.
@@ -401,59 +405,8 @@ public final class NoWebCheck implements Listener {
      * allowance by the observed interval instead of using one fixed packet
      * distance for every player and every connection.
      */
-    private double getAllowedMoveDistance(Player player, double elapsedTicks) {
-        // The configured value is a per-50-ms baseline, not a per-packet
-        // allowance. This keeps the limit consistent across packet batching.
-        // 25% of the normal 4.317 blocks/sec walking speed is about 0.054
-        // blocks per tick. Clamp legacy config values to a sane vanilla range.
-        double configuredPerTick = Math.max(0.052, Math.min(0.075,
-                plugin.getConfig().getDouble("checks.no-web.max-move-distance", 0.054)));
-        double bufferPerTick = Math.max(0.0, Math.min(0.002,
-                plugin.getConfig().getDouble("checks.no-web.movement-buffer", 0.0015)));
-        double strictMultiplier = Math.max(1.0, Math.min(1.08,
-                plugin.getConfig().getDouble("checks.no-web.speed-multiplier", 1.035)));
-
-        double attributeMultiplier = 1.0;
-        AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (movementSpeed != null && movementSpeed.getBaseValue() > 0.0) {
-            attributeMultiplier = movementSpeed.getValue() / movementSpeed.getBaseValue();
-        }
-
-        double potionMultiplier = 1.0;
-        PotionEffect speed = player.getPotionEffect(PotionEffectType.SPEED);
-        if (speed != null) {
-            potionMultiplier *= 1.0 + 0.2 * (speed.getAmplifier() + 1);
-        }
-        PotionEffect slowness = player.getPotionEffect(PotionEffectType.SLOWNESS);
-        if (slowness != null) {
-            potionMultiplier *= Math.max(0.05, 1.0 - 0.15 * (slowness.getAmplifier() + 1));
-        }
-        double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
-        double speedMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
-        speedMultiplier = Math.max(0.1, Math.min(4.0, speedMultiplier));
-
-        double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
-        var boots = player.getInventory().getBoots();
-        int swiftSneak = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SWIFT_SNEAK);
-        double stanceMultiplier = player.isSneaking()
-                ? Math.min(0.75, 0.30 + 0.15 * swiftSneak) : 1.0;
-        // In vanilla, a cobweb permits roughly 25% of normal movement speed;
-        // the Weaving effect raises this to about 50%. Read the effect by key
-        // so the check remains compatible with API versions around its addition.
-        double webMultiplier = 1.0;
-        for (PotionEffect effect : player.getActivePotionEffects()) {
-            if ("weaving".equals(effect.getType().getKey().getKey())) {
-                webMultiplier = 2.0;
-                break;
-            }
-        }
-
-        // Scale the tolerance with stance too; otherwise blocking/sneaking
-        // would inherit the full standing-player packet buffer.
-        double stanceBufferMultiplier = Math.max(0.20, stanceMultiplier);
-        return ((configuredPerTick * speedMultiplier * walkMultiplier * stanceMultiplier
-                * webMultiplier * strictMultiplier)
-                + bufferPerTick * stanceBufferMultiplier) * elapsedTicks;
+    private double getAllowedMoveDistance(MechanicsSnapshot snapshot, double elapsedTicks) {
+        return plugin.getMechanicsEngine().allowedCobwebDistance(snapshot, elapsedTicks);
     }
 
     private void returnToAnchor(Player player, Location requested, PlayerState state) {

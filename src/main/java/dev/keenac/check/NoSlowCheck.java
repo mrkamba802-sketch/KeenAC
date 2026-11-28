@@ -1,6 +1,7 @@
 package dev.keenac.check;
 
 import dev.keenac.KeenAC;
+import dev.keenac.mechanics.MovementPhysics;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -392,34 +393,10 @@ public final class NoSlowCheck implements Listener {
      * movement-speed potion/attribute modifiers.
      */
     private double getAllowedItemUseSpeed(Player player, boolean inWater) {
-        // When enabled, potion-driven movement attribute changes (for example
-        // Speed/Slowness) and Dolphin's Grace are included in the allowance.
         boolean includePotionEffects =
                 plugin.getConfig().getBoolean("checks.no-slow.potion-effects", true);
-        double movementMultiplier = 1.0;
-        Attribute movement = Attribute.MOVEMENT_SPEED;
-        if (player.getAttribute(movement) != null) {
-            double base = player.getAttribute(movement).getBaseValue();
-            double value = includePotionEffects
-                    ? player.getAttribute(movement).getValue() : base;
-            if (base > 0.0) {
-                movementMultiplier = Math.max(0.75, Math.min(4.0, value / base));
-            }
-        }
-
-        int depthStrider = 0;
-        if (inWater) {
-            ItemStack boots = player.getInventory().getBoots();
-            if (boots != null) {
-                depthStrider = boots.getEnchantmentLevel(Enchantment.DEPTH_STRIDER);
-            }
-        }
-
-        boolean dolphinsGrace = includePotionEffects
-                && player.hasPotionEffect(PotionEffectType.DOLPHINS_GRACE);
-        return NoSlowMovementSpeed.allowedItemUseSpeed(
-                inWater, dolphinsGrace, player.isSwimming(), player.isSprinting(),
-                depthStrider, movementMultiplier);
+        return plugin.getMechanicsEngine().allowedItemUseSpeed(
+                player, inWater, includePotionEffects);
     }
 
     private boolean isExempt(Player player, Block block) {

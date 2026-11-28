@@ -95,12 +95,23 @@ public final class MovementPhysics {
             int potionLevelCap,
             double attributeMultiplierCap
     ) {
+        return allowedItemUseSpeed(snapshot, snapshot != null && snapshot.inWater(),
+                includePotionEffects, potionLevelCap, attributeMultiplierCap);
+    }
+
+    public static double allowedItemUseSpeed(
+            MechanicsSnapshot snapshot,
+            boolean inWaterOverride,
+            boolean includePotionEffects,
+            int potionLevelCap,
+            double attributeMultiplierCap
+    ) {
         if (snapshot == null) return 4.317 * 0.2;
         Profile profile = profile(snapshot, potionLevelCap, attributeMultiplierCap);
         double movementMultiplier = includePotionEffects
                 ? profile.movementWithoutSprint() : 1.0;
         return allowedItemUseSpeed(
-                snapshot.inWater(),
+                inWaterOverride || snapshot.inWater(),
                 snapshot.hasPotionEffect("dolphins_grace"),
                 snapshot.swimming(),
                 snapshot.sprinting(),
@@ -109,7 +120,7 @@ public final class MovementPhysics {
         );
     }
 
-    /** Shared item-use speed calculation; kept parameterized for regression tests. */
+    /** Shared item-use speed calculation; kept parameterized for regression tests; kept parameterized for regression tests. */
     public static double allowedItemUseSpeed(
             boolean inWater,
             boolean dolphinsGrace,

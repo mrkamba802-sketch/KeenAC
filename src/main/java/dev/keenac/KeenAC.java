@@ -4,6 +4,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import dev.keenac.alert.AlertManager;
 import dev.keenac.context.PlayerContextManager;
+import dev.keenac.mechanics.MechanicsEngine;
 import dev.keenac.evidence.EvidenceManager;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.AuraCheck;
@@ -60,6 +61,7 @@ public final class KeenAC extends JavaPlugin {
     private ScaffoldCheck scaffoldCheck;
     private AlertManager alertManager;
     private PlayerContextManager playerContextManager;
+    private MechanicsEngine mechanicsEngine;
     private EvidenceManager evidenceManager;
     private PacketListenerAbstract packetListener;
     private PacketListenerAbstract auraPacketListener;
@@ -85,6 +87,8 @@ public final class KeenAC extends JavaPlugin {
         saveDefaultConfig();
         playerContextManager = new PlayerContextManager();
         Bukkit.getPluginManager().registerEvents(playerContextManager, this);
+        mechanicsEngine = new MechanicsEngine(this);
+        Bukkit.getPluginManager().registerEvents(mechanicsEngine, this);
         evidenceManager = new EvidenceManager(this, playerContextManager);
         alertManager = new AlertManager(this);
         movementSetbackManager = new MovementSetbackManager(this);
@@ -181,6 +185,10 @@ public final class KeenAC extends JavaPlugin {
         return playerContextManager;
     }
 
+    public MechanicsEngine getMechanicsEngine() {
+        return mechanicsEngine;
+    }
+
     public EvidenceManager getEvidenceManager() {
         return evidenceManager;
     }
@@ -249,5 +257,6 @@ public final class KeenAC extends JavaPlugin {
         if (alertManager != null) alertManager.clearAll();
         if (evidenceManager != null) evidenceManager.clearAll();
         if (playerContextManager != null) playerContextManager.clearAll();
+        if (mechanicsEngine != null) mechanicsEngine.clearAll();
     }
 }

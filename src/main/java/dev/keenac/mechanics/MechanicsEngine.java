@@ -21,7 +21,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
-import org.bukkit.event.player.PlayerDropItemEvent;
+
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.util.BoundingBox;
@@ -95,7 +95,7 @@ public final class MechanicsEngine implements Listener {
                 player.isSneaking(),
                 player.isBlocking(),
                 player.isSwimming(),
-                player.isInWater(),
+                player.isInWater() || player.isSwimming() || worldSnapshot.inWater(),
                 player.isFlying(),
                 player.isGliding(),
                 player.isInsideVehicle(),
@@ -146,27 +146,11 @@ public final class MechanicsEngine implements Listener {
 
     public double allowedItemUseSpeed(Player player, boolean inWater, boolean includePotionEffects) {
         MechanicsSnapshot snapshot = capture(player);
-        if (inWater && !snapshot.inWater()) {
-            snapshot = new MechanicsSnapshot(
-                    snapshot.playerId(), snapshot.worldName(), snapshot.capturedAtNanos(),
-                    snapshot.x(), snapshot.y(), snapshot.z(),
-                    snapshot.velocityX(), snapshot.velocityY(), snapshot.velocityZ(),
-                    snapshot.pingMs(), snapshot.tps(), snapshot.gameMode(),
-                    snapshot.onGround(), snapshot.sprinting(), snapshot.sneaking(), snapshot.blocking(),
-                    snapshot.swimming(), true, snapshot.flying(), snapshot.gliding(), snapshot.inVehicle(),
-                    snapshot.climbing(), snapshot.riptiding(), snapshot.usingItem(), snapshot.fallDistance(),
-                    snapshot.walkSpeed(), snapshot.mainHandType(), snapshot.offHandType(), snapshot.activeItemType(),
-                    snapshot.bootsType(), snapshot.leggingsType(), snapshot.chestplateType(), snapshot.helmetType(),
-                    snapshot.inventoryType(), snapshot.selectedHotbarSlot(), snapshot.potionEffects(),
-                    snapshot.attributes(), snapshot.enchantmentLevels(), snapshot.world(),
-                    snapshot.teleportAgeMs(), snapshot.velocityAgeMs(), snapshot.damageAgeMs(),
-                    snapshot.itemChangeAgeMs(), snapshot.glideChangeAgeMs());
-        }
         int potionCap = Math.max(1, Math.min(100,
                 plugin.getConfig().getInt("mechanics.potion-level-cap", 100)));
         double attributeCap = plugin.getConfig().getDouble(
                 "mechanics.movement-attribute-cap", 64.0);
-        return MovementPhysics.allowedItemUseSpeed(snapshot, includePotionEffects,
+        return MovementPhysics.allowedItemUseSpeed(snapshot, inWater, includePotionEffects,
                 potionCap, attributeCap);
     }
 
