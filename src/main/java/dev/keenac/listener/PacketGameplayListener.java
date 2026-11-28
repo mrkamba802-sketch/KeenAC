@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAttack;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
@@ -49,6 +50,16 @@ public final class PacketGameplayListener extends PacketListenerAbstract {
 
         var playerId = player.getUniqueId();
         var type = event.getPacketType();
+
+        if (type == PacketType.Play.Client.ENTITY_ACTION) {
+            WrapperPlayClientEntityAction action = new WrapperPlayClientEntityAction(event);
+            if (action.getAction() == WrapperPlayClientEntityAction.Action.START_SPRINTING) {
+                plugin.getMechanicsEngine().recordClientSprintAction(playerId, true);
+            } else if (action.getAction() == WrapperPlayClientEntityAction.Action.STOP_SPRINTING) {
+                plugin.getMechanicsEngine().recordClientSprintAction(playerId, false);
+            }
+            return;
+        }
 
         if (WrapperPlayClientPlayerFlying.isFlying(type)) {
             WrapperPlayClientPlayerFlying movement = new WrapperPlayClientPlayerFlying(event);

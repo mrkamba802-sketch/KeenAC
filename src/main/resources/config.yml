@@ -300,6 +300,12 @@ mechanics:
       max-age-ms: 1200
       # Ignore tiny velocity changes that are not useful knockback evidence.
       min-impulse-speed: 0.06
+      # Keep the impulse context briefly longer for high-round-trip-time players.
+      ping-extension-ms: 500
+      # A sprint stop -> start sequence must fit inside this window to be tagged as a reset.
+      sprint-reset-window-ms: 300
+    # High-ping movement packets can arrive in wider gaps; cap the additional prediction horizon.
+    packet-gap-extension-ms: 125
 
 evidence:
   enabled: true

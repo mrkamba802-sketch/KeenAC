@@ -80,6 +80,8 @@ public final class MotionCheck implements Listener {
     private volatile int predictionConfirmSamples = 5;
     private volatile boolean knockbackPredictionEnabled = true;
     private volatile long knockbackPredictionMaxAgeMs = 1200L;
+    private volatile long knockbackPredictionPingExtensionMs = 500L;
+    private volatile long predictionPacketGapExtensionNanos = 125_000_000L;
     private volatile double knockbackPredictionMinSpeed = 0.06;
     private volatile double motionSpeedMultiplier = 1.06;
     private volatile double motionSpeedBufferBps = 0.12;
@@ -436,6 +438,13 @@ public final class MotionCheck implements Listener {
                 "mechanics.prediction.knockback.enabled", true);
         knockbackPredictionMaxAgeMs = Math.max(150L, Math.min(3000L,
                 plugin.getConfig().getLong("mechanics.prediction.knockback.max-age-ms", 1200L)));
+        knockbackPredictionPingExtensionMs = Math.max(0L, Math.min(1000L,
+                plugin.getConfig().getLong(
+                        "mechanics.prediction.knockback.ping-extension-ms", 500L)));
+        predictionPacketGapExtensionNanos = Math.max(0L, Math.min(250L,
+                plugin.getConfig().getLong(
+                        "mechanics.prediction.packet-gap-extension-ms", 125L)))
+                * 1_000_000L;
         knockbackPredictionMinSpeed = Math.max(0.01, Math.min(1.0,
                 plugin.getConfig().getDouble("mechanics.prediction.knockback.min-impulse-speed", 0.06)));
     }
@@ -462,11 +471,17 @@ public final class MotionCheck implements Listener {
                 && !mechanics.hasPotionEffect("slow_falling")
                 && !unsupportedSurface;
         boolean stableMovementEligible = movementModeEligible && !recentVelocity;
-        KnockbackPhysics.Impulse lastImpulse = plugin.getMechanicsEngine()
-                .lastVelocityImpulse(id);
+        long nowNanos = System.nanoTime();
+        var mechanicsEngine = plugin.getMechanicsEngine();
+        KnockbackPhysics.Impulse lastImpulse = mechanicsEngine.lastVelocityImpulse(id);
+        KnockbackPhysics.CombatImpulse combatImpulse = mechanicsEngine.lastCombatImpulse(id);
         boolean knockbackActive = knockbackPredictionEnabled
-                && KnockbackPhysics.isRecentImpulse(lastImpulse, System.nanoTime(),
-                knockbackPredictionMaxAgeMs, knockbackPredictionMinSpeed);
+                && (KnockbackPhysics.isRecentImpulse(lastImpulse, nowNanos,
+                        knockbackPredictionMaxAgeMs, mechanics.pingMs(),
+                        knockbackPredictionPingExtensionMs, knockbackPredictionMinSpeed)
+                || KnockbackPhysics.isRecentCombatImpulse(combatImpulse, nowNanos,
+                        knockbackPredictionMaxAgeMs, mechanics.pingMs(),
+                        knockbackPredictionPingExtensionMs, knockbackPredictionMinSpeed));
 
         MovementPhysics.Profile movementProfile = plugin.getMechanicsEngine().movementProfile(mechanics);
         long jumpAt = lastJumpAt.getOrDefault(id, 0L);
@@ -492,7 +507,7 @@ public final class MotionCheck implements Listener {
                         mechanics.damageAgeMs(), 500L, knockbackActive)
                 && ageAllowsPrediction(mechanics.teleportAgeMs(), 500L)
                 && ageAllowsPrediction(mechanics.itemChangeAgeMs(), 250L)
-                && player.getPing() <= Math.min(motionPacketMaxPing, 200);
+                && player.getPing() <= motionPacketMaxPing;
         motionPacketProfiles.put(id, new MotionPacketProfile(
                 enabled && movementModeEligible,
                 stableMovementEligible,
@@ -661,12 +676,14 @@ public final class MotionCheck implements Listener {
             return null;
         }
 
-        if (elapsedNanos < 35_000_000L || elapsedNanos > 125_000_000L) {
+        long maximumPacketGap = KnockbackPhysics.maxPredictionIntervalNanos(
+                profile.ping, 125_000_000L, predictionPacketGapExtensionNanos);
+        if (elapsedNanos < 35_000_000L || elapsedNanos > maximumPacketGap) {
             state.clearPrediction();
             return null;
         }
 
-        int ticks = Math.max(1, Math.min(2,
+        int ticks = Math.max(1, Math.min(5,
                 (int) Math.round(elapsedNanos / 50_000_000.0)));
 
         // Wait for the first airborne position packet before scoring takeoff.
@@ -726,7 +743,7 @@ public final class MotionCheck implements Listener {
         double baseTolerance = airborneTransition || profile.knockbackActive
                 ? predictionAirTolerance : predictionTolerance;
         double tolerance = baseTolerance + (ticks - 1) * 0.025
-                + Math.min(0.025, profile.ping * 0.00005);
+                + Math.min(0.05, profile.ping * 0.0001);
         if (prediction.collidedHorizontally() && error <= tolerance * 1.5) {
             state.predictionSamples = Math.max(0, state.predictionSamples - 1);
         } else if (error > tolerance) {

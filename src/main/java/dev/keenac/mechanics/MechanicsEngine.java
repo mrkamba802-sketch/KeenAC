@@ -1,6 +1,7 @@
 package dev.keenac.mechanics;
 
 import dev.keenac.KeenAC;
+import io.papermc.paper.event.entity.EntityPushedByEntityAttackEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -50,6 +51,8 @@ public final class MechanicsEngine implements Listener {
     private final Map<UUID, Long> lastTeleportNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastVelocityNanos = new ConcurrentHashMap<>();
     private final Map<UUID, KnockbackPhysics.Impulse> lastVelocityImpulses = new ConcurrentHashMap<>();
+    private final Map<UUID, KnockbackPhysics.CombatImpulse> lastCombatImpulses = new ConcurrentHashMap<>();
+    private final Map<UUID, KnockbackPhysics.SprintState> clientSprintStates = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastDamageNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastItemChangeNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastGlideChangeNanos = new ConcurrentHashMap<>();
@@ -134,6 +137,28 @@ public final class MechanicsEngine implements Listener {
     /** Latest accepted server velocity event, captured on the primary thread. */
     public KnockbackPhysics.Impulse lastVelocityImpulse(UUID playerId) {
         return playerId == null ? null : lastVelocityImpulses.get(playerId);
+    }
+
+    /** Latest PvP knockback event and its server-side combat context. */
+    public KnockbackPhysics.CombatImpulse lastCombatImpulse(UUID playerId) {
+        return playerId == null ? null : lastCombatImpulses.get(playerId);
+    }
+
+    /** Packet-thread-safe sprint action capture; only primitive values are stored. */
+    public void recordClientSprintAction(UUID playerId, boolean sprinting) {
+        if (playerId == null) return;
+        long now = System.nanoTime();
+        clientSprintStates.compute(playerId, (ignored, previous) -> {
+            if (previous == null) {
+                return new KnockbackPhysics.SprintState(
+                        sprinting, sprinting ? now : 0L, sprinting ? 0L : now);
+            }
+            if (previous.sprinting() == sprinting) return previous;
+            return new KnockbackPhysics.SprintState(
+                    sprinting,
+                    sprinting ? now : previous.lastStartedAtNanos(),
+                    sprinting ? previous.lastStoppedAtNanos() : now);
+        });
     }
 
     public MovementPhysics.Profile movementProfile(MechanicsSnapshot snapshot) {
@@ -387,6 +412,14 @@ public final class MechanicsEngine implements Listener {
         return eventNanos == null ? -1L : Math.max(0L, (now - eventNanos) / 1_000_000L);
     }
 
+    private long ageMillis(long now, long eventNanos) {
+        return eventNanos <= 0L ? -1L : Math.max(0L, (now - eventNanos) / 1_000_000L);
+    }
+
+    private double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
     private void mark(Map<UUID, Long> target, UUID id) {
         if (id != null) target.put(id, System.nanoTime());
     }
@@ -395,6 +428,7 @@ public final class MechanicsEngine implements Listener {
     public void onTeleport(PlayerTeleportEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         lastVelocityImpulses.remove(id);
+        lastCombatImpulses.remove(id);
         mark(lastTeleportNanos, id);
     }
 
@@ -402,6 +436,7 @@ public final class MechanicsEngine implements Listener {
     public void onWorldChange(PlayerChangedWorldEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         lastVelocityImpulses.remove(id);
+        lastCombatImpulses.remove(id);
         mark(lastTeleportNanos, id);
     }
 
@@ -409,7 +444,48 @@ public final class MechanicsEngine implements Listener {
     public void onRespawn(PlayerRespawnEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         lastVelocityImpulses.remove(id);
+        lastCombatImpulses.remove(id);
         mark(lastTeleportNanos, id);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityPushedByAttack(EntityPushedByEntityAttackEvent event) {
+        if (!(event.getEntity() instanceof Player target)) return;
+        if (!(event.getPushedBy() instanceof Player attacker)) return;
+
+        long now = System.nanoTime();
+        UUID attackerId = attacker.getUniqueId();
+        KnockbackPhysics.SprintState sprintState = clientSprintStates.get(attackerId);
+        long sprintStartAge = sprintState == null ? -1L
+                : ageMillis(now, sprintState.lastStartedAtNanos());
+        long stopToStart = sprintState == null
+                || sprintState.lastStoppedAtNanos() <= 0L
+                || sprintState.lastStartedAtNanos() < sprintState.lastStoppedAtNanos()
+                ? -1L
+                : (sprintState.lastStartedAtNanos() - sprintState.lastStoppedAtNanos())
+                        / 1_000_000L;
+        boolean attackerSprinting = attacker.isSprinting();
+        long sprintResetWindow = Math.max(50L, Math.min(500L,
+                plugin.getConfig().getLong(
+                        "mechanics.prediction.knockback.sprint-reset-window-ms", 300L)));
+        boolean sprintReset = KnockbackPhysics.isSprintResetWithinWindow(
+                attackerSprinting, sprintStartAge, stopToStart, sprintResetWindow);
+
+        var force = event.getKnockback();
+        var before = target.getVelocity();
+        var targetResistance = target.getAttribute(Attribute.KNOCKBACK_RESISTANCE);
+        var attackerKnockback = attacker.getAttribute(Attribute.ATTACK_KNOCKBACK);
+        int knockbackEnchantment = captureEnchantments(attacker)
+                .getOrDefault("main_hand:knockback", 0);
+        lastCombatImpulses.put(target.getUniqueId(), new KnockbackPhysics.CombatImpulse(
+                new KnockbackPhysics.MotionVector(force.getX(), force.getY(), force.getZ()),
+                new KnockbackPhysics.MotionVector(before.getX(), before.getY(), before.getZ()),
+                KnockbackPhysics.MotionVector.zero(),
+                false, 0L, now, event.getCause().name(), attackerId,
+                attackerSprinting, sprintReset, sprintStartAge, stopToStart,
+                targetResistance == null ? 0.0 : finiteOrZero(targetResistance.getValue()),
+                attackerKnockback == null ? 0.0 : finiteOrZero(attackerKnockback.getValue()),
+                knockbackEnchantment, Math.max(0, attacker.getPing())));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -420,6 +496,14 @@ public final class MechanicsEngine implements Listener {
         lastVelocityNanos.put(id, now);
         lastVelocityImpulses.put(id, new KnockbackPhysics.Impulse(
                 velocity.getX(), velocity.getY(), velocity.getZ(), now));
+
+        KnockbackPhysics.CombatImpulse combatImpulse = lastCombatImpulses.get(id);
+        if (combatImpulse != null && now >= combatImpulse.timestampNanos()
+                && now - combatImpulse.timestampNanos() <= 250_000_000L) {
+            lastCombatImpulses.put(id, combatImpulse.withAppliedVelocity(
+                    new KnockbackPhysics.MotionVector(
+                            velocity.getX(), velocity.getY(), velocity.getZ()), now));
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -462,6 +546,8 @@ public final class MechanicsEngine implements Listener {
         lastTeleportNanos.remove(id);
         lastVelocityNanos.remove(id);
         lastVelocityImpulses.remove(id);
+        lastCombatImpulses.remove(id);
+        clientSprintStates.remove(id);
         lastDamageNanos.remove(id);
         lastItemChangeNanos.remove(id);
         lastGlideChangeNanos.remove(id);
@@ -472,6 +558,8 @@ public final class MechanicsEngine implements Listener {
         lastTeleportNanos.clear();
         lastVelocityNanos.clear();
         lastVelocityImpulses.clear();
+        lastCombatImpulses.clear();
+        clientSprintStates.clear();
         lastDamageNanos.clear();
         lastItemChangeNanos.clear();
         lastGlideChangeNanos.clear();
