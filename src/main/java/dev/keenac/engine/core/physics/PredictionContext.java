@@ -38,10 +38,11 @@ public final class PredictionContext {
         double ldx = lastX - lastLastX;
         double ldz = lastZ - lastLastZ;
         this.lastHorizontalSpeed = Math.sqrt(ldx * ldx + ldz * ldz);
-        double speedMult = PredictionEngine.getSpeedPotionMultiplier(player);
-        double slowMult = PredictionEngine.getSlownessPotionMultiplier(player);
+        // AttributeSnapshot reads the effective MOVEMENT_SPEED attribute, including
+        // active attribute modifiers. Applying potion multipliers again double-counts
+        // Speed/Slowness and can make legal movement exceed the prediction.
         this.baseSpeed = PredictionEngine.calculateBaseSpeed(
-                sprinting, sneaking, speedMult, slowMult, player.getAttributeSnapshot());
+                sprinting, sneaking, 1.0, 1.0, player.getAttributeSnapshot());
         this.predictedMaxHorizontalSpeed = PredictionEngine.calculateMaxHorizontalSpeed(
                 baseSpeed, lastHorizontalSpeed, onGround, climbing, swimming, protocolVersion,
                 player.getAttributeSnapshot());
