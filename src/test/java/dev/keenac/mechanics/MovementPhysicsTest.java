@@ -80,6 +80,16 @@ class MovementPhysicsTest {
     }
 
     @Test
+    void cobwebIsNotTreatedAsAnAlternativeSurfaceForTheNoWebCheck() {
+        WorldMechanicsSnapshot web = new WorldMechanicsSnapshot(
+                "world", "STONE", "COBWEB", "AIR", Set.of("COBWEB"),
+                false, false, false, true, true, java.util.List.of(), 0.6);
+
+        assertFalse(web.hasAlternativeMovementSurface());
+        assertTrue(web.inCobweb());
+    }
+
+    @Test
     void cobwebAllowanceScalesWithLegitimatePotionAndWeavingMechanics() {
         MechanicsSnapshot ordinary = snapshot(Map.of(), Map.of(), Map.of(),
                 false, false, 0.2, new MechanicsSnapshot.AttributeState(0.1, 0.1));
@@ -121,7 +131,7 @@ class MovementPhysicsTest {
                 "CRAFTING", 0,
                 effects, fullAttributes, enchantments,
                 new WorldMechanicsSnapshot("world", "STONE", "AIR", "AIR",
-                        Set.of(), false, false, false, false, true),
+                        Set.of(), false, false, false, false, true, java.util.List.of(), 0.6),
                 -1, -1, -1, -1, -1
         );
     }

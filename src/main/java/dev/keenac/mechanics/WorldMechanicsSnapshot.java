@@ -2,6 +2,7 @@ package dev.keenac.mechanics;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.List;
 
 /**
  * Immutable view of blocks intersecting the player's predicted bounding box,
@@ -18,7 +19,9 @@ public record WorldMechanicsSnapshot(
         boolean inPowderSnow,
         boolean climbing,
         boolean inCobweb,
-        boolean chunkDataComplete
+        boolean chunkDataComplete,
+        List<CollisionBox> collisionBoxes,
+        double supportSlipperiness
 ) {
     public WorldMechanicsSnapshot {
         worldName = worldName == null ? "" : worldName;
@@ -27,11 +30,13 @@ public record WorldMechanicsSnapshot(
         blockAtHead = normalize(blockAtHead);
         intersectingMaterials = intersectingMaterials == null
                 ? Set.of() : Set.copyOf(intersectingMaterials);
+        collisionBoxes = collisionBoxes == null ? List.of() : List.copyOf(collisionBoxes);
+        if (!Double.isFinite(supportSlipperiness)) supportSlipperiness = 0.6;
     }
 
     public static WorldMechanicsSnapshot empty() {
         return new WorldMechanicsSnapshot("", "UNKNOWN", "UNKNOWN", "UNKNOWN",
-                Set.of(), false, false, false, false, false);
+                Set.of(), false, false, false, false, false, List.of(), 0.6);
     }
 
     public boolean hasMaterial(String material) {
@@ -46,7 +51,7 @@ public record WorldMechanicsSnapshot(
                 "ICE", "PACKED_ICE", "BLUE_ICE", "FROSTED_ICE",
                 "SOUL_SAND", "SOUL_SOIL", "MUD",
                 "LADDER", "VINE", "TWISTING_VINES", "WEEPING_VINES", "CAVE_VINES",
-                "SCAFFOLDING", "SWEET_BERRY_BUSH", "COBWEB", "WEB");
+                "SCAFFOLDING", "SWEET_BERRY_BUSH");
     }
 
     public boolean hasAny(String... materials) {

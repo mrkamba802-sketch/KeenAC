@@ -9,6 +9,7 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientIn
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
 import dev.keenac.check.AirStuckCheck;
 import dev.keenac.check.MotionCheck;
 import org.bukkit.entity.Player;
@@ -26,6 +27,15 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
     @Override
     public void onPacketReceive(PacketReceiveEvent event) {
         if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+
+        if (event.getPacketType() == PacketType.Play.Client.PLAYER_INPUT) {
+            WrapperPlayClientPlayerInput input = new WrapperPlayClientPlayerInput(event);
+            motionCheck.recordPlayerInput(
+                    player.getUniqueId(),
+                    input.isForward(), input.isBackward(), input.isLeft(), input.isRight(),
+                    input.isJump(), input.isShift(), input.isSprint());
             return;
         }
 
