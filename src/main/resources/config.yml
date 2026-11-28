@@ -290,6 +290,8 @@ mechanics:
     # Maximum 3D difference between predicted and observed per-tick position.
     # This intentionally starts conservative; tune only after live-server review.
     position-tolerance: 0.095
+    # Wider tolerance for the first jump/airborne ticks while the vertical model is active.
+    air-tolerance: 0.18
     # Consecutive high-confidence prediction misses required for a Motion signal.
     confirm-samples: 5
 

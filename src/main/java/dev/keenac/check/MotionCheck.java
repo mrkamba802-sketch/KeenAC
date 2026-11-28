@@ -74,6 +74,7 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, MovementInput> movementInputs = new ConcurrentHashMap<>();
     private volatile boolean predictionEnabled = true;
     private volatile double predictionTolerance = 0.095;
+    private volatile double predictionAirTolerance = 0.18;
     private volatile int predictionConfirmSamples = 5;
     private volatile double motionSpeedMultiplier = 1.06;
     private volatile double motionSpeedBufferBps = 0.12;
@@ -421,6 +422,8 @@ public final class MotionCheck implements Listener {
         predictionEnabled = plugin.getConfig().getBoolean("mechanics.prediction.enabled", true);
         predictionTolerance = Math.max(0.035, Math.min(0.25,
                 plugin.getConfig().getDouble("mechanics.prediction.position-tolerance", 0.095)));
+        predictionAirTolerance = Math.max(0.08, Math.min(0.40,
+                plugin.getConfig().getDouble("mechanics.prediction.air-tolerance", 0.18)));
         predictionConfirmSamples = Math.max(3, Math.min(12,
                 plugin.getConfig().getInt("mechanics.prediction.confirm-samples", 5)));
     }
@@ -449,7 +452,9 @@ public final class MotionCheck implements Listener {
 
         MovementPhysics.Profile movementProfile = plugin.getMechanicsEngine().movementProfile(mechanics);
         long jumpAt = lastJumpAt.getOrDefault(id, 0L);
-        boolean recentJump = jumpAt > 0L && now - jumpAt <= 600L;
+        // Keep a short, event-backed window for the complete jump arc. Falling
+        // from an edge without a recent jump event remains outside this model.
+        boolean recentJump = jumpAt > 0L && now - jumpAt <= 900L;
         // A short sprint-jump impulse is allowed, but the base speed allowance
         // now comes from the same mechanics model as NoWeb and NoSlow.
         double airborneMultiplier = mechanics.onGround() ? 1.0 : recentJump ? 1.22 : 1.08;
@@ -459,7 +464,7 @@ public final class MotionCheck implements Listener {
         boolean hoverEligible = movementModeEligible && !player.isOnGround()
                 && !mechanics.hasPotionEffect("jump_boost");
         boolean predictionEligible = predictionEnabled && enabled && movementModeEligible
-                && mechanics.onGround() && !mechanics.usingItem()
+                && (mechanics.onGround() || recentJump) && !mechanics.usingItem()
                 && !mechanics.world().inCobweb()
                 && mechanics.world().chunkDataComplete()
                 && !mechanics.hasPotionEffect("jump_boost")
@@ -475,6 +480,7 @@ public final class MotionCheck implements Listener {
                 allowedHorizontalBps,
                 player.getVelocity().getY(),
                 predictionEligible,
+                recentJump,
                 mechanics,
                 (float) location.getYaw()));
     }
@@ -604,9 +610,10 @@ public final class MotionCheck implements Listener {
             long nowNanos,
             long elapsedNanos
     ) {
-        if (!profile.predictionEligible || input == null || !packetOnGround
-                || !state.lastPacketOnGround || !profile.mechanics.world().chunkDataComplete()
-                || input.jump()
+        boolean airborneTransition = !packetOnGround || !state.lastPacketOnGround;
+        if (!profile.predictionEligible || input == null
+                || (airborneTransition && !profile.recentJump)
+                || !profile.mechanics.world().chunkDataComplete()
                 || input.sprint() != profile.mechanics.sprinting()
                 || input.sneak() != profile.mechanics.sneaking()) {
             state.clearPrediction();
@@ -620,10 +627,32 @@ public final class MotionCheck implements Listener {
 
         int ticks = Math.max(1, Math.min(2,
                 (int) Math.round(elapsedNanos / 50_000_000.0)));
+
+        // Wait for the first airborne position packet before scoring takeoff.
+        // This avoids flagging the one-packet ordering gap between PlayerJumpEvent
+        // and the client's updated on-ground bit.
+        boolean takeoffNotObserved = state.lastPacketOnGround && packetOnGround
+                && profile.recentJump
+                && (input.jump() || profile.mechanics.velocityY() > 0.20);
+        if (takeoffNotObserved) {
+            state.clearPrediction();
+            return null;
+        }
+
+        MovementInput simulationInput = input;
+        if (state.lastPacketOnGround && profile.recentJump && !input.jump()
+                && profile.mechanics.velocityY() > 0.20) {
+            simulationInput = new MovementInput(
+                    input.forward(), input.backward(), input.left(), input.right(),
+                    true, input.sneak(), input.sprint(), input.receivedAtNanos());
+        }
+
         if (state.predictedState == null) {
             state.predictedState = new MovementState(
                     state.lastX, state.lastY, state.lastZ,
-                    profile.mechanics.velocityX(), 0.0, profile.mechanics.velocityZ(),
+                    profile.mechanics.velocityX(),
+                    state.lastPacketOnGround ? 0.0 : profile.mechanics.velocityY(),
+                    profile.mechanics.velocityZ(),
                     profile.yaw, state.lastPacketOnGround);
         }
 
@@ -632,7 +661,7 @@ public final class MotionCheck implements Listener {
         MovementPhysicsSimulator.Result prediction;
         try {
             prediction = MovementPhysicsSimulator.simulate(
-                    state.predictedState, input, profile.mechanics, movementProfile, ticks);
+                    state.predictedState, simulationInput, profile.mechanics, movementProfile, ticks);
         } catch (IllegalArgumentException ignored) {
             state.clearPrediction();
             return null;
@@ -646,7 +675,9 @@ public final class MotionCheck implements Listener {
 
         // A collision or an API snapshot near an unloaded chunk is a low-confidence
         // sample; do not turn an incomplete world view into a violation.
-        double tolerance = predictionTolerance + (ticks - 1) * 0.025
+        double baseTolerance = airborneTransition
+                ? predictionAirTolerance : predictionTolerance;
+        double tolerance = baseTolerance + (ticks - 1) * 0.025
                 + Math.min(0.025, profile.ping * 0.00005);
         if (prediction.collidedHorizontally() && error <= tolerance * 1.5) {
             state.predictionSamples = Math.max(0, state.predictionSamples - 1);
@@ -680,6 +711,7 @@ public final class MotionCheck implements Listener {
             double allowedHorizontalBps,
             double verticalVelocity,
             boolean predictionEligible,
+            boolean recentJump,
             MechanicsSnapshot mechanics,
             float yaw) { }
 

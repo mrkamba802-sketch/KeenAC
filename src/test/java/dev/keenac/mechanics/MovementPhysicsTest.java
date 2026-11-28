@@ -114,6 +114,51 @@ class MovementPhysicsTest {
         assertTrue(result.state().x() <= 0.700001);
     }
 
+    @Test
+    void movementSimulatorPredictsJumpImpulseAndAirborneGravity() {
+        MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
+                new CollisionBox(-5, 63, -5, 5, 64, 5)), 0.6);
+        MovementState initial = new MovementState(0.0, 64.0, 0.0,
+                0.0, 0.0, 0.0, 0.0f, true);
+        MovementInput jump = new MovementInput(
+                false, false, false, false, true, false, false, 1L);
+
+        MovementPhysics.Profile profile = MovementPhysics.profile(mechanics, 100, 64.0);
+        MovementPhysicsSimulator.Result takeoff = MovementPhysicsSimulator.simulate(
+                initial, jump, mechanics, profile, 1);
+
+        assertFalse(takeoff.state().onGround());
+        assertEquals(64.3332, takeoff.state().y(), 1.0E-6);
+        assertEquals(0.3332, takeoff.state().velocityY(), 1.0E-6);
+
+        MovementInput noJump = new MovementInput(
+                false, false, false, false, false, false, false, 2L);
+        MovementPhysicsSimulator.Result airborne = MovementPhysicsSimulator.simulate(
+                takeoff.state(), noJump, mechanics, profile, 1);
+
+        assertTrue(airborne.state().y() > takeoff.state().y());
+        assertEquals(0.248136, airborne.state().velocityY(), 1.0E-6);
+        assertFalse(airborne.state().onGround());
+    }
+
+    @Test
+    void movementSimulatorDetectsLandingAfterAJumpArc() {
+        MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
+                new CollisionBox(-5, 63, -5, 5, 64, 5)), 0.6);
+        MovementState falling = new MovementState(0.0, 64.45, 0.0,
+                0.0, -0.45, 0.0, 0.0f, false);
+        MovementInput idle = new MovementInput(
+                false, false, false, false, false, false, false, 1L);
+
+        MovementPhysicsSimulator.Result landed = simulateRepeated(
+                falling, idle, mechanics, 12);
+
+        assertTrue(landed.state().onGround());
+        assertEquals(64.0, landed.state().y(), 1.0E-6);
+        assertEquals(0.0, landed.state().velocityY(), 1.0E-9);
+        assertTrue(landed.collidedVertically());
+    }
+
     private MovementPhysicsSimulator.Result simulateRepeated(
             MovementState initial, MovementInput input, MechanicsSnapshot mechanics, int ticks
     ) {
