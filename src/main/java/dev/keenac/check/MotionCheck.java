@@ -488,7 +488,8 @@ public final class MotionCheck implements Listener {
                 && mechanics.world().chunkDataComplete()
                 && !mechanics.hasPotionEffect("jump_boost")
                 && (ageAllowsPrediction(mechanics.velocityAgeMs(), 350L) || knockbackActive)
-                && ageAllowsPrediction(mechanics.damageAgeMs(), 500L)
+                && KnockbackPhysics.allowsPredictionDuringDamageGrace(
+                        mechanics.damageAgeMs(), 500L, knockbackActive)
                 && ageAllowsPrediction(mechanics.teleportAgeMs(), 500L)
                 && ageAllowsPrediction(mechanics.itemChangeAgeMs(), 250L)
                 && player.getPing() <= Math.min(motionPacketMaxPing, 200);
@@ -715,10 +716,10 @@ public final class MotionCheck implements Listener {
         }
 
         MovementState predicted = prediction.state();
-        double dx = actualX - predicted.x();
-        double dy = actualY - predicted.y();
-        double dz = actualZ - predicted.z();
-        double error = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        // This signal detects horizontal speed/strafe anomalies. Vertical
+        // divergence is evaluated by the dedicated vertical/hover checks.
+        double error = MovementPhysicsSimulator.horizontalError(
+                predicted, actualX, actualZ);
 
         // A collision or an API snapshot near an unloaded chunk is a low-confidence
         // sample; do not turn an incomplete world view into a violation.

@@ -10,6 +10,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MovementPhysicsTest {
     @Test
+    void horizontalPredictionErrorIgnoresVerticalDivergence() {
+        MovementState predicted = new MovementState(
+                2.0, 64.0, -3.0, 0.0, 0.0, 0.0, 0.0f, false);
+
+        assertEquals(0.05,
+                MovementPhysicsSimulator.horizontalError(predicted, 2.03, -2.96), 1.0E-9);
+        assertThrows(IllegalArgumentException.class,
+                () -> MovementPhysicsSimulator.horizontalError(predicted, Double.NaN, 0.0));
+    }
+
+    @Test
     void preservesPotionLevelsThroughOneHundredAndUsesThemInTheMovementBudget() {
         MechanicsSnapshot snapshot = snapshot(
                 Map.of("speed", new MechanicsSnapshot.EffectState(100, 1200, false, true, true)),

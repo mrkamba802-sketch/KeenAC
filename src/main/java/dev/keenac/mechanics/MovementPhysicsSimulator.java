@@ -22,6 +22,20 @@ public final class MovementPhysicsSimulator {
 
     private MovementPhysicsSimulator() { }
 
+    /**
+     * Horizontal-only prediction error for checks whose signal concerns planar
+     * movement. Vertical divergence is intentionally handled by separate checks.
+     */
+    public static double horizontalError(
+            MovementState predicted, double actualX, double actualZ
+    ) {
+        if (predicted == null || !predicted.isFinite()
+                || !Double.isFinite(actualX) || !Double.isFinite(actualZ)) {
+            throw new IllegalArgumentException("A finite predicted state and observed position are required.");
+        }
+        return Math.hypot(actualX - predicted.x(), actualZ - predicted.z());
+    }
+
     public static Result simulate(
             MovementState initial,
             MovementInput input,

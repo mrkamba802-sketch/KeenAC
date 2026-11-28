@@ -35,6 +35,15 @@ class KnockbackPhysicsTest {
     }
 
     @Test
+    void recentDamageOnlySuppressesPredictionWhenNoStrongVelocityImpulseWasObserved() {
+        assertFalse(KnockbackPhysics.allowsPredictionDuringDamageGrace(100L, 500L, false));
+        assertTrue(KnockbackPhysics.allowsPredictionDuringDamageGrace(100L, 500L, true));
+        assertTrue(KnockbackPhysics.allowsPredictionDuringDamageGrace(-1L, 500L, false));
+        assertTrue(KnockbackPhysics.allowsPredictionDuringDamageGrace(500L, 500L, false));
+        assertTrue(KnockbackPhysics.allowsPredictionDuringDamageGrace(100L, 0L, false));
+    }
+
+    @Test
     void seedsPredictionWithServerVelocityAndAirborneState() {
         MechanicsSnapshot mechanics = snapshot(0.42, 0.36, -0.18);
         MovementState state = KnockbackPhysics.seedState(

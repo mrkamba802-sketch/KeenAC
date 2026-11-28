@@ -10,6 +10,19 @@ public final class KnockbackPhysics {
 
     private KnockbackPhysics() { }
 
+    /**
+     * A recent, sufficiently strong server velocity event provides the context
+     * needed to keep prediction active during the generic post-damage quiet
+     * window. Without that event, recent damage remains a prediction suppressor.
+     */
+    public static boolean allowsPredictionDuringDamageGrace(
+            long damageAgeMillis, long gracePeriodMillis, boolean knockbackActive
+    ) {
+        return knockbackActive
+                || damageAgeMillis < 0L
+                || damageAgeMillis >= Math.max(0L, gracePeriodMillis);
+    }
+
     public static boolean isRecentImpulse(
             Impulse impulse, long nowNanos, long maxAgeMillis, double minimumSpeed
     ) {
