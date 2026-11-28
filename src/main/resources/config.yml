@@ -1,28 +1,395 @@
 # KeenAC core configuration
-# Detection checks will be added separately in a future integration.
+# Each check can be tuned independently. Changes apply with /keenac reload.
 
 evidence:
   enabled: true
-  # In-memory history is bounded to protect server memory.
   max-players: 512
   max-per-player: 40
 
 alerts:
   enabled: true
-  # Real-time minimum delay between alerts for the same player and check.
   delay-seconds: 3
-  # Send alerts to console as well as opted-in staff.
   console: true
-  # Supports legacy & color codes and placeholders:
-  # {prefix}, {player}, {check}, {vl}, {reason}, {ping}, {tps}
   format: "{prefix} &f{player} &7failed &c{check} &8(x{vl})"
   prefix: "&bKeenAC &8»"
-  # Automatically enable alert reception for players with keenac.alerts permission.
   auto-enable-for-staff: true
 
 commands:
-  # Permission nodes are also declared in plugin.yml.
   use-permission: "keenac.use"
   alerts-permission: "keenac.alerts"
   reload-permission: "keenac.reload"
   review-permission: "keenac.review"
+
+checks:
+  # Used only when a check does not define its own value below.
+  default:
+    enabled: true
+    max-vl: 100
+    setback-vl: 20
+    decay: 0.02
+    punishable: false
+  keenac:
+    combat:
+      aim:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.01
+        punishable: false
+      autoclicker:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      backtrack:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      criticals:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.01
+        punishable: false
+      crystal:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      fastheal:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      hitboxes:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      interactcursor:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      killaura:
+        enabled: true
+        max-vl: 100
+        setback-vl: 25
+        decay: 0.005
+        punishable: false
+      macro:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      multiinteract:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      reach:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.05
+        punishable: false
+      selfinteract:
+        enabled: true
+        max-vl: 100
+        setback-vl: 5
+        decay: 0
+        punishable: false
+      swordblock:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.015
+        punishable: false
+    inventory:
+      inventory:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.02
+        punishable: false
+    movement:
+      airliquidbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      airliquidplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      baritone:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      elytra:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      farbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      farplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      fastbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.02
+        punishable: false
+      fly:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      gravity:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.02
+        punishable: false
+      groundspoof:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      illegalmove:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.4
+        punishable: false
+      invalidbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      invalidplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      invalidplacecursor:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      motion:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      multibreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      multiplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      nofall:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      noslow:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      noswing:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      sprint:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      phase:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      positionbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      positionplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      rotationbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.02
+        punishable: false
+      rotationplace:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      scaffold:
+        enabled: true
+        max-vl: 100
+        setback-vl: 30
+        decay: 0.005
+        punishable: false
+      scaffoldsupport:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+      simulation:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      speed:
+        enabled: true
+        max-vl: 100
+        setback-vl: 20
+        decay: 0.01
+        punishable: false
+      step:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      timer:
+        enabled: true
+        max-vl: 100
+        setback-vl: 25
+        decay: 0.005
+        punishable: false
+      velocity:
+        enabled: true
+        max-vl: 100
+        setback-vl: 30
+        decay: 0.01
+        punishable: false
+      wrongbreak:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0.02
+        punishable: false
+    packet:
+      bad:
+        enabled: true
+        max-vl: 100
+        setback-vl: 5
+        decay: 0
+        punishable: false
+      chat:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      cheststealer:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      brand:
+        enabled: true
+        max-vl: 100
+        setback-vl: 10
+        decay: 0
+        punishable: false
+      crash:
+        enabled: true
+        max-vl: 100
+        setback-vl: 5
+        decay: 0
+        punishable: false
+      creative:
+        enabled: true
+        max-vl: 100
+        setback-vl: 5
+        decay: 0
+        punishable: false
+      exploit:
+        enabled: true
+        max-vl: 100
+        setback-vl: 5
+        decay: 0
+        punishable: false
+      order:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      sprint:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
+      transaction:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.005
+        punishable: false
+      vehicle:
+        enabled: true
+        max-vl: 100
+        setback-vl: 15
+        decay: 0.01
+        punishable: false
