@@ -46,7 +46,7 @@ public record WorldMechanicsSnapshot(
                 "ICE", "PACKED_ICE", "BLUE_ICE", "FROSTED_ICE",
                 "SOUL_SAND", "SOUL_SOIL", "MUD",
                 "LADDER", "VINE", "TWISTING_VINES", "WEEPING_VINES", "CAVE_VINES",
-                "SCAFFOLDING", "SWEET_BERRY_BUSH", "COBWEB", "WEB");
+                "SCAFFOLDING", "SWEET_BERRY_BUSH");
     }
 
     public boolean hasAny(String... materials) {

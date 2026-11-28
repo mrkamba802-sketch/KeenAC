@@ -120,7 +120,7 @@ public final class MovementPhysics {
         );
     }
 
-    /** Shared item-use speed calculation; kept parameterized for regression tests; kept parameterized for regression tests. */
+    /** Shared item-use speed calculation; kept parameterized for regression tests. */
     public static double allowedItemUseSpeed(
             boolean inWater,
             boolean dolphinsGrace,

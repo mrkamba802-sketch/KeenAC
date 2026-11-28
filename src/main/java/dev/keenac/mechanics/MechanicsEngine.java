@@ -21,6 +21,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
@@ -231,7 +232,7 @@ public final class MechanicsEngine implements Listener {
         BoundingBox liveBox = player.getBoundingBox();
         double halfX = Math.max(0.15, liveBox.getWidthX() * 0.5);
         double halfZ = Math.max(0.15, liveBox.getWidthZ() * 0.5);
-        double height = Math.max(1.0, Math.min(3.0, liveBox.getHeight()));
+        double height = Math.max(1.0, Math.min(3.0, liveBox.getWidthY()));
 
         int minX = floor(location.getX() - halfX + 0.001);
         int maxX = floor(location.getX() + halfX - 0.001);
