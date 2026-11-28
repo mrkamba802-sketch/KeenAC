@@ -44,6 +44,60 @@ class KnockbackPhysicsTest {
     }
 
     @Test
+    void pingExtendsImpulseWindowWithoutAllowingUnboundedAge() {
+        assertEquals(1_400L, KnockbackPhysics.effectiveImpulseWindowMillis(1200L, 200, 500L));
+        assertEquals(1_700L, KnockbackPhysics.effectiveImpulseWindowMillis(1200L, 900, 500L));
+        assertEquals(1200L, KnockbackPhysics.effectiveImpulseWindowMillis(1200L, -10, 500L));
+
+        long now = 5_000_000_000L;
+        KnockbackPhysics.Impulse delayed = new KnockbackPhysics.Impulse(
+                0.35, 0.42, -0.10, now - 1_350_000_000L);
+        assertFalse(KnockbackPhysics.isRecentImpulse(delayed, now, 1200L, 0.06));
+        assertTrue(KnockbackPhysics.isRecentImpulse(
+                delayed, now, 1200L, 200, 500L, 0.06));
+    }
+
+    @Test
+    void highPingWidensPacketGapOnlyToTheConfiguredCap() {
+        assertEquals(175_000_000L,
+                KnockbackPhysics.maxPredictionIntervalNanos(100, 125_000_000L, 125_000_000L));
+        assertEquals(250_000_000L,
+                KnockbackPhysics.maxPredictionIntervalNanos(500, 125_000_000L, 125_000_000L));
+        assertEquals(125_000_000L,
+                KnockbackPhysics.maxPredictionIntervalNanos(-20, 125_000_000L, 125_000_000L));
+    }
+
+    @Test
+    void sprintResetRequiresARecentStopThenStartWhileAttackerIsSprinting() {
+        assertTrue(KnockbackPhysics.isSprintResetWithinWindow(true, 80L, 120L, 300L));
+        assertFalse(KnockbackPhysics.isSprintResetWithinWindow(false, 80L, 120L, 300L));
+        assertFalse(KnockbackPhysics.isSprintResetWithinWindow(true, 301L, 120L, 300L));
+        assertFalse(KnockbackPhysics.isSprintResetWithinWindow(true, 80L, 301L, 300L));
+        assertFalse(KnockbackPhysics.isSprintResetWithinWindow(true, -1L, 120L, 300L));
+    }
+
+    @Test
+    void pairsCombatKnockbackWithTheFollowingAuthoritativeVelocityWithoutEquatingThem() {
+        KnockbackPhysics.CombatImpulse combat = new KnockbackPhysics.CombatImpulse(
+                new KnockbackPhysics.MotionVector(0.35, 0.32, -0.12),
+                new KnockbackPhysics.MotionVector(0.04, 0.0, 0.02),
+                KnockbackPhysics.MotionVector.zero(),
+                false, 0L, 1_000L, "ENTITY_ATTACK", UUID.randomUUID(),
+                true, true, 80L, 120L, 0.0, 0.1, 1, 45);
+
+        KnockbackPhysics.CombatImpulse paired = combat.withAppliedVelocity(
+                new KnockbackPhysics.MotionVector(0.30, 0.28, -0.10), 1_020L);
+
+        assertFalse(combat.appliedVelocityCaptured());
+        assertTrue(paired.appliedVelocityCaptured());
+        assertEquals(0.30, paired.appliedVelocity().x(), 1.0E-9);
+        assertEquals(0.35, paired.knockback().x(), 1.0E-9);
+        assertTrue(paired.sprintReset());
+        assertTrue(KnockbackPhysics.isRecentCombatImpulse(
+                paired, 1_100L, 1200L, 45, 500L, 0.06));
+    }
+
+    @Test
     void seedsPredictionWithServerVelocityAndAirborneState() {
         MechanicsSnapshot mechanics = snapshot(0.42, 0.36, -0.18);
         MovementState state = KnockbackPhysics.seedState(
