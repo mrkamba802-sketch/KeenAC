@@ -81,8 +81,9 @@ class MovementPhysicsTest {
 
     @Test
     void movementSimulatorConvergesToVanillaGroundSpeedAndKeepsGroundContact() {
+        // Long, flat runway: the simulator must not fall off the test platform.
         MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
-                new CollisionBox(-5, 63, -5, 5, 64, 5)), 0.6);
+                new CollisionBox(-5, 63, -100, 5, 64, 100)), 0.6);
         MovementState initial = new MovementState(0.0, 64.0, 0.0,
                 0.0, 0.0, 0.0, 0.0f, true);
         MovementInput forward = new MovementInput(
