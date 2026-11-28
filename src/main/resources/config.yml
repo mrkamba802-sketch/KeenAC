@@ -294,6 +294,12 @@ mechanics:
     air-tolerance: 0.18
     # Consecutive high-confidence prediction misses required for a Motion signal.
     confirm-samples: 5
+    knockback:
+      enabled: true
+      # Only use a recent accepted server velocity event as an impulse anchor.
+      max-age-ms: 1200
+      # Ignore tiny velocity changes that are not useful knockback evidence.
+      min-impulse-speed: 0.06
 
 evidence:
   enabled: true
