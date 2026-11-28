@@ -115,6 +115,22 @@ class MovementPhysicsTest {
     }
 
     @Test
+    void movementSimulatorUsesTheLatestPacketYawForForwardInput() {
+        MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
+                new CollisionBox(-100, 63, -100, 100, 64, 100)), 0.6);
+        MovementState initial = new MovementState(0.0, 64.0, 0.0,
+                0.0, 0.0, 0.0, 90.0f, true);
+        MovementInput forward = new MovementInput(
+                true, false, false, false, false, false, false, 1L);
+
+        MovementPhysicsSimulator.Result result = MovementPhysicsSimulator.simulate(
+                initial, forward, mechanics, MovementPhysics.profile(mechanics, 100, 64.0), 1);
+
+        assertTrue(result.state().x() < 0.0);
+        assertEquals(0.0, result.state().z(), 1.0E-9);
+    }
+
+    @Test
     void movementSimulatorPredictsJumpImpulseAndAirborneGravity() {
         MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
                 new CollisionBox(-5, 63, -5, 5, 64, 5)), 0.6);

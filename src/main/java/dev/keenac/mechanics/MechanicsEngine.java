@@ -49,6 +49,7 @@ public final class MechanicsEngine implements Listener {
     private final KeenAC plugin;
     private final Map<UUID, Long> lastTeleportNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastVelocityNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, KnockbackPhysics.Impulse> lastVelocityImpulses = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastDamageNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastItemChangeNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastGlideChangeNanos = new ConcurrentHashMap<>();
@@ -128,6 +129,11 @@ public final class MechanicsEngine implements Listener {
                 ageMillis(now, lastItemChangeNanos.get(player.getUniqueId())),
                 ageMillis(now, lastGlideChangeNanos.get(player.getUniqueId()))
         );
+    }
+
+    /** Latest accepted server velocity event, captured on the primary thread. */
+    public KnockbackPhysics.Impulse lastVelocityImpulse(UUID playerId) {
+        return playerId == null ? null : lastVelocityImpulses.get(playerId);
     }
 
     public MovementPhysics.Profile movementProfile(MechanicsSnapshot snapshot) {
@@ -387,22 +393,33 @@ public final class MechanicsEngine implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
-        mark(lastTeleportNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        lastVelocityImpulses.remove(id);
+        mark(lastTeleportNanos, id);
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onVelocity(PlayerVelocityEvent event) {
-        mark(lastVelocityNanos, event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        long now = System.nanoTime();
+        var velocity = event.getVelocity();
+        lastVelocityNanos.put(id, now);
+        lastVelocityImpulses.put(id, new KnockbackPhysics.Impulse(
+                velocity.getX(), velocity.getY(), velocity.getZ(), now));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -444,6 +461,7 @@ public final class MechanicsEngine implements Listener {
         UUID id = event.getPlayer().getUniqueId();
         lastTeleportNanos.remove(id);
         lastVelocityNanos.remove(id);
+        lastVelocityImpulses.remove(id);
         lastDamageNanos.remove(id);
         lastItemChangeNanos.remove(id);
         lastGlideChangeNanos.remove(id);
@@ -453,6 +471,7 @@ public final class MechanicsEngine implements Listener {
     public void clearAll() {
         lastTeleportNanos.clear();
         lastVelocityNanos.clear();
+        lastVelocityImpulses.clear();
         lastDamageNanos.clear();
         lastItemChangeNanos.clear();
         lastGlideChangeNanos.clear();

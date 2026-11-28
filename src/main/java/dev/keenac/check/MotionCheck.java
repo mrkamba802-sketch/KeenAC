@@ -3,6 +3,7 @@ package dev.keenac.check;
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import dev.keenac.KeenAC;
 import dev.keenac.mechanics.MechanicsSnapshot;
+import dev.keenac.mechanics.KnockbackPhysics;
 import dev.keenac.mechanics.MovementPhysics;
 import dev.keenac.mechanics.MovementInput;
 import dev.keenac.mechanics.MovementState;
@@ -72,10 +73,14 @@ public final class MotionCheck implements Listener {
     private final Map<UUID, MotionPacketProfile> motionPacketProfiles = new ConcurrentHashMap<>();
     private final Map<UUID, MotionPacketState> motionPacketStates = new ConcurrentHashMap<>();
     private final Map<UUID, MovementInput> movementInputs = new ConcurrentHashMap<>();
+    private final Map<UUID, PacketRotation> packetRotations = new ConcurrentHashMap<>();
     private volatile boolean predictionEnabled = true;
     private volatile double predictionTolerance = 0.095;
     private volatile double predictionAirTolerance = 0.18;
     private volatile int predictionConfirmSamples = 5;
+    private volatile boolean knockbackPredictionEnabled = true;
+    private volatile long knockbackPredictionMaxAgeMs = 1200L;
+    private volatile double knockbackPredictionMinSpeed = 0.06;
     private volatile double motionSpeedMultiplier = 1.06;
     private volatile double motionSpeedBufferBps = 0.12;
     private volatile int motionSpeedConfirmSamples = 3;
@@ -130,6 +135,7 @@ public final class MotionCheck implements Listener {
         elytraGlidingPlayers.retainAll(online);
         elytraPing.keySet().removeIf(id -> !online.contains(id));
         movementInputs.keySet().removeIf(id -> !online.contains(id));
+        packetRotations.keySet().removeIf(id -> !online.contains(id));
         motionPacketProfiles.keySet().removeIf(id -> !online.contains(id));
         motionPacketStates.keySet().removeIf(id -> !online.contains(id));
         lastSafePosition.keySet().removeIf(id -> !online.contains(id));
@@ -426,6 +432,12 @@ public final class MotionCheck implements Listener {
                 plugin.getConfig().getDouble("mechanics.prediction.air-tolerance", 0.18)));
         predictionConfirmSamples = Math.max(3, Math.min(12,
                 plugin.getConfig().getInt("mechanics.prediction.confirm-samples", 5)));
+        knockbackPredictionEnabled = plugin.getConfig().getBoolean(
+                "mechanics.prediction.knockback.enabled", true);
+        knockbackPredictionMaxAgeMs = Math.max(150L, Math.min(3000L,
+                plugin.getConfig().getLong("mechanics.prediction.knockback.max-age-ms", 1200L)));
+        knockbackPredictionMinSpeed = Math.max(0.01, Math.min(1.0,
+                plugin.getConfig().getDouble("mechanics.prediction.knockback.min-impulse-speed", 0.06)));
     }
 
     private void refreshMotionPacketProfile(Player player, boolean enabled) {
@@ -448,7 +460,13 @@ public final class MotionCheck implements Listener {
                 && "CRAFTING".equals(mechanics.inventoryType())
                 && !mechanics.hasPotionEffect("levitation")
                 && !mechanics.hasPotionEffect("slow_falling")
-                && !unsupportedSurface && !recentVelocity;
+                && !unsupportedSurface;
+        boolean stableMovementEligible = movementModeEligible && !recentVelocity;
+        KnockbackPhysics.Impulse lastImpulse = plugin.getMechanicsEngine()
+                .lastVelocityImpulse(id);
+        boolean knockbackActive = knockbackPredictionEnabled
+                && KnockbackPhysics.isRecentImpulse(lastImpulse, System.nanoTime(),
+                knockbackPredictionMaxAgeMs, knockbackPredictionMinSpeed);
 
         MovementPhysics.Profile movementProfile = plugin.getMechanicsEngine().movementProfile(mechanics);
         long jumpAt = lastJumpAt.getOrDefault(id, 0L);
@@ -461,26 +479,29 @@ public final class MotionCheck implements Listener {
         double allowedHorizontalBps = movementProfile.normalHorizontalSpeedBps()
                 * surfaceMultiplier * airborneMultiplier;
 
-        boolean hoverEligible = movementModeEligible && !player.isOnGround()
+        boolean hoverEligible = stableMovementEligible && !player.isOnGround()
                 && !mechanics.hasPotionEffect("jump_boost");
-        boolean predictionEligible = predictionEnabled && enabled && movementModeEligible
-                && (mechanics.onGround() || recentJump) && !mechanics.usingItem()
+        boolean predictionEligible = predictionEnabled && enabled
+                && (stableMovementEligible || knockbackActive)
+                && (mechanics.onGround() || recentJump || knockbackActive) && !mechanics.usingItem()
                 && !mechanics.world().inCobweb()
                 && mechanics.world().chunkDataComplete()
                 && !mechanics.hasPotionEffect("jump_boost")
-                && ageAllowsPrediction(mechanics.velocityAgeMs(), 350L)
+                && (ageAllowsPrediction(mechanics.velocityAgeMs(), 350L) || knockbackActive)
                 && ageAllowsPrediction(mechanics.damageAgeMs(), 500L)
                 && ageAllowsPrediction(mechanics.teleportAgeMs(), 500L)
                 && ageAllowsPrediction(mechanics.itemChangeAgeMs(), 250L)
                 && player.getPing() <= Math.min(motionPacketMaxPing, 200);
         motionPacketProfiles.put(id, new MotionPacketProfile(
                 enabled && movementModeEligible,
+                stableMovementEligible,
                 hoverEligible,
                 player.getPing(),
                 allowedHorizontalBps,
                 player.getVelocity().getY(),
                 predictionEligible,
                 recentJump,
+                knockbackActive,
                 mechanics,
                 (float) location.getYaw()));
     }
@@ -500,6 +521,16 @@ public final class MotionCheck implements Listener {
     }
 
     /**
+     * Store the latest client camera rotation. Rotation-only packets update this
+     * state and the values remain valid until the next rotation packet.
+     */
+    public void recordPacketRotation(UUID id, float yaw, float pitch) {
+        if (id == null || !Float.isFinite(yaw) || !Float.isFinite(pitch)) return;
+        packetRotations.put(id, new PacketRotation(yaw,
+                Math.max(-90.0f, Math.min(90.0f, pitch))));
+    }
+
+    /**
      * Receives absolute client positions. The legacy rolling speed window remains
      * as a fallback; when 1.21.2+ input state is available, a per-tick simulation
      * adds a second independent signal using Paper collision shapes.
@@ -516,8 +547,15 @@ public final class MotionCheck implements Listener {
                 id, ignored -> new MotionPacketState());
         String reason = null;
         synchronized (state) {
+            PacketRotation latestRotation = packetRotations.get(id);
+            if (latestRotation != null) {
+                state.updateRotation(latestRotation);
+            } else if (!state.hasPacketRotation) {
+                state.packetYaw = profile.yaw;
+            }
             if (state.lastPacketNanos == 0L || nowNanos - state.lastPacketNanos > 750_000_000L) {
-                state.reset(x, y, z, nowNanos, packetOnGround);
+                state.reset(x, y, z, nowNanos, packetOnGround, profile.yaw);
+                if (latestRotation != null) state.updateRotation(latestRotation);
                 return;
             }
 
@@ -550,7 +588,7 @@ public final class MotionCheck implements Listener {
             MotionPositionSample first = state.positions.peekFirst();
             MotionPositionSample last = state.positions.peekLast();
             long windowNanos = last.timestampNanos - first.timestampNanos;
-            if (windowNanos >= motionSpeedMinimumWindowNanos) {
+            if (profile.speedEligible && windowNanos >= motionSpeedMinimumWindowNanos) {
                 double dx = last.x - first.x;
                 double dz = last.z - first.z;
                 double horizontalBps = Math.sqrt(dx * dx + dz * dz)
@@ -571,6 +609,8 @@ public final class MotionCheck implements Listener {
                     state.lastSpeedSignalNanos = nowNanos;
                     reason = "horizontal-speed-strafe";
                 }
+            } else if (!profile.speedEligible) {
+                state.fastSamples = 0;
             }
 
             if (reason == null && predictionReason != null) {
@@ -612,7 +652,7 @@ public final class MotionCheck implements Listener {
     ) {
         boolean airborneTransition = !packetOnGround || !state.lastPacketOnGround;
         if (!profile.predictionEligible || input == null
-                || (airborneTransition && !profile.recentJump)
+                || (airborneTransition && !profile.recentJump && !profile.knockbackActive)
                 || !profile.mechanics.world().chunkDataComplete()
                 || input.sprint() != profile.mechanics.sprinting()
                 || input.sneak() != profile.mechanics.sneaking()) {
@@ -632,7 +672,7 @@ public final class MotionCheck implements Listener {
         // This avoids flagging the one-packet ordering gap between PlayerJumpEvent
         // and the client's updated on-ground bit.
         boolean takeoffNotObserved = state.lastPacketOnGround && packetOnGround
-                && profile.recentJump
+                && profile.recentJump && !profile.knockbackActive
                 && (input.jump() || profile.mechanics.velocityY() > 0.20);
         if (takeoffNotObserved) {
             state.clearPrediction();
@@ -648,12 +688,19 @@ public final class MotionCheck implements Listener {
         }
 
         if (state.predictedState == null) {
-            state.predictedState = new MovementState(
-                    state.lastX, state.lastY, state.lastZ,
-                    profile.mechanics.velocityX(),
-                    state.lastPacketOnGround ? 0.0 : profile.mechanics.velocityY(),
-                    profile.mechanics.velocityZ(),
-                    profile.yaw, state.lastPacketOnGround);
+            float predictionYaw = state.hasPacketRotation ? state.packetYaw : profile.yaw;
+            if (profile.knockbackActive) {
+                state.predictedState = KnockbackPhysics.seedState(
+                        state.lastX, state.lastY, state.lastZ,
+                        predictionYaw, state.lastPacketOnGround, profile.mechanics);
+            } else {
+                state.predictedState = new MovementState(
+                        state.lastX, state.lastY, state.lastZ,
+                        profile.mechanics.velocityX(),
+                        state.lastPacketOnGround ? 0.0 : profile.mechanics.velocityY(),
+                        profile.mechanics.velocityZ(),
+                        predictionYaw, state.lastPacketOnGround);
+            }
         }
 
         MovementPhysics.Profile movementProfile =
@@ -675,7 +722,7 @@ public final class MotionCheck implements Listener {
 
         // A collision or an API snapshot near an unloaded chunk is a low-confidence
         // sample; do not turn an incomplete world view into a violation.
-        double baseTolerance = airborneTransition
+        double baseTolerance = airborneTransition || profile.knockbackActive
                 ? predictionAirTolerance : predictionTolerance;
         double tolerance = baseTolerance + (ticks - 1) * 0.025
                 + Math.min(0.025, profile.ping * 0.00005);
@@ -689,10 +736,11 @@ public final class MotionCheck implements Listener {
 
         // Re-anchor position to the observed sample each time so model rounding
         // error cannot accumulate. Keep only the predicted velocity between ticks.
+        float predictionYaw = state.hasPacketRotation ? state.packetYaw : profile.yaw;
         state.predictedState = new MovementState(
                 actualX, actualY, actualZ,
                 predicted.velocityX(), predicted.velocityY(), predicted.velocityZ(),
-                profile.yaw, packetOnGround);
+                predictionYaw, packetOnGround);
         state.lastPredictionNanos = nowNanos;
 
         if (state.predictionSamples >= predictionConfirmSamples
@@ -706,16 +754,20 @@ public final class MotionCheck implements Listener {
 
     private record MotionPacketProfile(
             boolean eligible,
+            boolean speedEligible,
             boolean hoverEligible,
             int ping,
             double allowedHorizontalBps,
             double verticalVelocity,
             boolean predictionEligible,
             boolean recentJump,
+            boolean knockbackActive,
             MechanicsSnapshot mechanics,
             float yaw) { }
 
     private record MotionPositionSample(double x, double y, double z, long timestampNanos) { }
+
+    private record PacketRotation(float yaw, float pitch) { }
 
     private static final class MotionPacketState {
         private final Deque<MotionPositionSample> positions = new ArrayDeque<>();
@@ -727,13 +779,17 @@ public final class MotionCheck implements Listener {
         private double lastY;
         private double lastZ;
         private boolean lastPacketOnGround;
+        private float packetYaw;
+        private float packetPitch;
+        private boolean hasPacketRotation;
         private MovementState predictedState;
         private long lastPredictionNanos;
         private long lastPredictionSignalNanos;
         private int predictionSamples;
         private int fastSamples;
 
-        private void reset(double x, double y, double z, long nowNanos, boolean onGround) {
+        private void reset(double x, double y, double z, long nowNanos,
+                           boolean onGround, float fallbackYaw) {
             positions.clear();
             positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
             lastPacketNanos = nowNanos;
@@ -741,9 +797,19 @@ public final class MotionCheck implements Listener {
             lastY = y;
             lastZ = z;
             lastPacketOnGround = onGround;
+            packetYaw = fallbackYaw;
+            packetPitch = 0.0f;
+            hasPacketRotation = false;
             hoverSinceNanos = 0L;
             fastSamples = 0;
             clearPrediction();
+        }
+
+        private void updateRotation(PacketRotation rotation) {
+            if (rotation == null) return;
+            packetYaw = rotation.yaw();
+            packetPitch = rotation.pitch();
+            hasPacketRotation = true;
         }
 
         private void clearPrediction() {
@@ -866,6 +932,7 @@ public final class MotionCheck implements Listener {
         hoveringTicks.clear();
         motionPacketStates.clear();
         movementInputs.clear();
+        packetRotations.clear();
     }
 
     /**
@@ -1190,6 +1257,13 @@ public final class MotionCheck implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onVelocity(PlayerVelocityEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        MotionPacketState motionState = motionPacketStates.get(id);
+        if (motionState != null) {
+            synchronized (motionState) {
+                motionState.clearPrediction();
+                motionState.fastSamples = 0;
+            }
+        }
         if (plugin.getMovementSetbackManager().isCorrectionLocked(id)) {
             event.setVelocity(new Vector(0.0, 0.0, 0.0));
             return;
@@ -1251,6 +1325,7 @@ public final class MotionCheck implements Listener {
         motionPacketProfiles.remove(id);
         motionPacketStates.remove(id);
         movementInputs.remove(id);
+        packetRotations.remove(id);
         violationLevels.remove(id);
         lastSignalTick.remove(id);
     }
@@ -1269,6 +1344,7 @@ public final class MotionCheck implements Listener {
         elytraGlidingPlayers.clear();
         elytraPing.clear();
         movementInputs.clear();
+        packetRotations.clear();
         elytraViolationLevels.clear();
         pendingSetbacks.clear();
         pendingElytraSetbacks.clear();

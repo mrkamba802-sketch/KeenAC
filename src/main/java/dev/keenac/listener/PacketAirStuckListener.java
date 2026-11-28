@@ -44,6 +44,11 @@ public final class PacketAirStuckListener extends PacketListenerAbstract {
             var playerId = player.getUniqueId();
             com.github.retrooper.packetevents.protocol.world.Location packetLocation =
                     movement.getLocation();
+            boolean hasRotation = movement.hasRotationChanged() && packetLocation != null;
+            if (hasRotation) {
+                motionCheck.recordPacketRotation(playerId,
+                        packetLocation.getYaw(), packetLocation.getPitch());
+            }
             boolean hasPosition = movement.hasPositionChanged() && packetLocation != null;
             if (!hasPosition) {
                 return;
