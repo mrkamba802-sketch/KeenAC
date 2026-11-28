@@ -4,6 +4,7 @@ import dev.keenac.KeenAC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.enchantments.Enchantment;
@@ -12,6 +13,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
@@ -49,6 +52,7 @@ public final class MechanicsEngine implements Listener {
     private final Map<UUID, Long> lastDamageNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastItemChangeNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastGlideChangeNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, CachedWorldSnapshot> worldSnapshotCache = new ConcurrentHashMap<>();
 
     public MechanicsEngine(KeenAC plugin) {
         this.plugin = plugin;
@@ -229,23 +233,35 @@ public final class MechanicsEngine implements Listener {
 
     private WorldMechanicsSnapshot captureWorld(Player player, Location location) {
         World world = location.getWorld();
-        BoundingBox liveBox = player.getBoundingBox();
-        double halfX = Math.max(0.15, liveBox.getWidthX() * 0.5);
-        double halfZ = Math.max(0.15, liveBox.getWidthZ() * 0.5);
-        double height = Math.max(1.0, Math.min(3.0, (liveBox.getMaxY() - liveBox.getMinY())));
+        int centerX = floor(location.getX());
+        int centerY = floor(location.getY());
+        int centerZ = floor(location.getZ());
+        long nowNanos = System.nanoTime();
+        UUID playerId = player.getUniqueId();
+        CachedWorldSnapshot cached = worldSnapshotCache.get(playerId);
+        if (cached != null && cached.worldName().equals(world.getName())
+                && cached.centerX() == centerX && cached.centerY() == centerY
+                && cached.centerZ() == centerZ
+                && nowNanos - cached.capturedAtNanos() < 100_000_000L) {
+            return cached.snapshot();
+        }
 
-        int minX = floor(location.getX() - halfX + 0.001);
-        int maxX = floor(location.getX() + halfX - 0.001);
-        int minY = floor(location.getY() + 0.001);
-        int maxY = floor(location.getY() + height - 0.001);
-        int minZ = floor(location.getZ() - halfZ + 0.001);
-        int maxZ = floor(location.getZ() + halfZ - 0.001);
+        BoundingBox liveBox = player.getBoundingBox();
+        double height = Math.max(1.0, Math.min(3.0,
+                liveBox.getMaxY() - liveBox.getMinY()));
+
+        int playerMinX = floor(location.getX() - liveBox.getWidthX() * 0.5 + 0.001);
+        int playerMaxX = floor(location.getX() + liveBox.getWidthX() * 0.5 - 0.001);
+        int playerMinY = floor(location.getY() + 0.001);
+        int playerMaxY = floor(location.getY() + height - 0.001);
+        int playerMinZ = floor(location.getZ() - liveBox.getWidthZ() * 0.5 + 0.001);
+        int playerMaxZ = floor(location.getZ() + liveBox.getWidthZ() * 0.5 - 0.001);
 
         Set<String> intersecting = new HashSet<>();
         boolean complete = true;
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
+        for (int x = playerMinX; x <= playerMaxX; x++) {
+            for (int y = playerMinY; y <= playerMaxY; y++) {
+                for (int z = playerMinZ; z <= playerMaxZ; z++) {
                     if (!world.isChunkLoaded(x >> 4, z >> 4)) {
                         complete = false;
                         continue;
@@ -266,6 +282,30 @@ public final class MechanicsEngine implements Listener {
         String head = readBlock(world, floor(location.getX()),
                 floor(location.getY() + height - 0.05), floor(location.getZ()));
 
+        // Capture nearby precise collision shapes for a short movement horizon.
+        // The three-block-wide horizontal area covers ordinary one-tick motion
+        // and the step-up attempt without loading chunks on behalf of the check.
+        java.util.List<CollisionBox> collisions = new java.util.ArrayList<>();
+        for (int x = centerX - 1; x <= centerX + 1; x++) {
+            for (int y = centerY - 1; y <= centerY + 2; y++) {
+                for (int z = centerZ - 1; z <= centerZ + 1; z++) {
+                    if (y < world.getMinHeight() || y >= world.getMaxHeight()
+                            || !world.isChunkLoaded(x >> 4, z >> 4)) {
+                        complete = false;
+                        continue;
+                    }
+                    Block block = world.getBlockAt(x, y, z);
+                    for (BoundingBox shape : block.getCollisionShape().getBoundingBoxes()) {
+                        collisions.add(new CollisionBox(
+                                x + shape.getMinX(), y + shape.getMinY(), z + shape.getMinZ(),
+                                x + shape.getMaxX(), y + shape.getMaxY(), z + shape.getMaxZ()
+                        ));
+                        if (collisions.size() >= 512) break;
+                    }
+                }
+            }
+        }
+
         boolean water = player.isInWater() || player.isSwimming()
                 || contains(intersecting, "WATER", "BUBBLE_COLUMN", "KELP", "KELP_PLANT");
         boolean powderSnow = contains(intersecting, "POWDER_SNOW")
@@ -274,9 +314,47 @@ public final class MechanicsEngine implements Listener {
                 || contains(intersecting, "LADDER", "VINE", "TWISTING_VINES",
                 "WEEPING_VINES", "CAVE_VINES", "SCAFFOLDING");
         boolean cobweb = contains(intersecting, "COBWEB", "WEB");
-        return new WorldMechanicsSnapshot(world.getName(), below, feet, head,
-                intersecting, water, powderSnow, climbing, cobweb, complete);
+
+        double slipperiness = 0.6;
+        int supportX = floor(location.getX());
+        int supportY = floor(location.getY() - 0.02);
+        int supportZ = floor(location.getZ());
+        if (supportY >= world.getMinHeight() && supportY < world.getMaxHeight()
+                && world.isChunkLoaded(supportX >> 4, supportZ >> 4)) {
+            try {
+                slipperiness = world.getBlockAt(supportX, supportY, supportZ)
+                        .getType().getSlipperiness();
+            } catch (RuntimeException ignored) {
+                slipperiness = 0.6;
+            }
+        }
+
+        WorldMechanicsSnapshot snapshot = new WorldMechanicsSnapshot(world.getName(), below, feet, head,
+                intersecting, water, powderSnow, climbing, cobweb, complete,
+                collisions, slipperiness);
+        worldSnapshotCache.put(playerId, new CachedWorldSnapshot(
+                world.getName(), centerX, centerY, centerZ, nowNanos, snapshot));
+        return snapshot;
     }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        worldSnapshotCache.clear();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        worldSnapshotCache.clear();
+    }
+
+    private record CachedWorldSnapshot(
+            String worldName,
+            int centerX,
+            int centerY,
+            int centerZ,
+            long capturedAtNanos,
+            WorldMechanicsSnapshot snapshot
+    ) { }
 
     private String readBlock(World world, int x, int y, int z) {
         if (y < world.getMinHeight() || y >= world.getMaxHeight()) return "OUT_OF_WORLD";
@@ -369,6 +447,7 @@ public final class MechanicsEngine implements Listener {
         lastDamageNanos.remove(id);
         lastItemChangeNanos.remove(id);
         lastGlideChangeNanos.remove(id);
+        worldSnapshotCache.remove(id);
     }
 
     public void clearAll() {
@@ -377,5 +456,6 @@ public final class MechanicsEngine implements Listener {
         lastDamageNanos.clear();
         lastItemChangeNanos.clear();
         lastGlideChangeNanos.clear();
+        worldSnapshotCache.clear();
     }
 }

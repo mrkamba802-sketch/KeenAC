@@ -285,6 +285,13 @@ checks:
 mechanics:
   potion-level-cap: 100
   movement-attribute-cap: 64.0
+  prediction:
+    enabled: true
+    # Maximum 3D difference between predicted and observed per-tick position.
+    # This intentionally starts conservative; tune only after live-server review.
+    position-tolerance: 0.095
+    # Consecutive high-confidence prediction misses required for a Motion signal.
+    confirm-samples: 5
 
 evidence:
   enabled: true

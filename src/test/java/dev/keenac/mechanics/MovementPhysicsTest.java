@@ -74,9 +74,91 @@ class MovementPhysicsTest {
     void alternativeBlocksAreMarkedAsUnsuitableForSimpleMovementPrediction() {
         WorldMechanicsSnapshot world = new WorldMechanicsSnapshot(
                 "world", "ICE", "AIR", "AIR", Set.of("ICE"),
-                false, false, false, false, true);
+                false, false, false, false, true, java.util.List.of(), 0.6);
 
         assertTrue(MovementPhysics.hasUnsupportedMovementSurface(world));
+    }
+
+    @Test
+    void movementSimulatorConvergesToVanillaGroundSpeedAndKeepsGroundContact() {
+        // Long, flat runway: the simulator must not fall off the test platform.
+        MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
+                new CollisionBox(-5, 63, -100, 5, 64, 100)), 0.6);
+        MovementState initial = new MovementState(0.0, 64.0, 0.0,
+                0.0, 0.0, 0.0, 0.0f, true);
+        MovementInput forward = new MovementInput(
+                true, false, false, false, false, false, false, 1L);
+
+        MovementPhysicsSimulator.Result result = simulateRepeated(
+                initial, forward, mechanics, 60);
+
+        assertTrue(result.state().z() > 10.0);
+        assertEquals(4.317 / 20.0, result.state().velocityZ(), 0.002);
+        assertTrue(result.state().onGround());
+    }
+
+    @Test
+    void movementSimulatorClipsThePlayerAgainstAFullBlockWall() {
+        MechanicsSnapshot mechanics = simulationSnapshot(java.util.List.of(
+                new CollisionBox(-5, 63, -5, 5, 64, 5),
+                new CollisionBox(1, 64, -1, 2, 66, 1)), 0.6);
+        MovementState initial = new MovementState(0.5, 64.0, 0.0,
+                0.0, 0.0, 0.0, 0.0f, true);
+        MovementInput right = new MovementInput(
+                false, false, false, true, false, false, false, 1L);
+
+        MovementPhysicsSimulator.Result result = simulateRepeated(
+                initial, right, mechanics, 60);
+
+        assertTrue(result.collidedHorizontally());
+        assertTrue(result.state().x() <= 0.700001);
+    }
+
+    private MovementPhysicsSimulator.Result simulateRepeated(
+            MovementState initial, MovementInput input, MechanicsSnapshot mechanics, int ticks
+    ) {
+        MovementPhysics.Profile profile = MovementPhysics.profile(mechanics, 100, 64.0);
+        MovementState state = initial;
+        boolean horizontalCollision = false;
+        boolean verticalCollision = false;
+        for (int tick = 0; tick < ticks; tick++) {
+            MovementPhysicsSimulator.Result result = MovementPhysicsSimulator.simulate(
+                    state, input, mechanics, profile, 1);
+            state = result.state();
+            horizontalCollision |= result.collidedHorizontally();
+            verticalCollision |= result.collidedVertically();
+        }
+        return new MovementPhysicsSimulator.Result(state, horizontalCollision, verticalCollision);
+    }
+
+    private MechanicsSnapshot simulationSnapshot(
+            java.util.List<CollisionBox> collisions, double slipperiness
+    ) {
+        WorldMechanicsSnapshot world = new WorldMechanicsSnapshot(
+                "world", "STONE", "AIR", "AIR", Set.of(),
+                false, false, false, false, true, collisions, slipperiness);
+        return new MechanicsSnapshot(
+                UUID.randomUUID(), "world", 1L,
+                0.0, 64.0, 0.0, 0.0, 0.0, 0.0,
+                50, 20.0, "SURVIVAL",
+                true, false, false, false, false, false,
+                false, false, false, false, false, false,
+                0.0f, 0.2,
+                "AIR", "AIR", "AIR", "AIR", "AIR", "AIR", "AIR",
+                "CRAFTING", 0,
+                Map.of(), Map.of("movement_speed",
+                        new MechanicsSnapshot.AttributeState(0.1, 0.1)),
+                Map.of(), world, -1, -1, -1, -1, -1);
+    }
+
+    @Test
+    void cobwebIsNotTreatedAsAnAlternativeSurfaceForTheNoWebCheck() {
+        WorldMechanicsSnapshot web = new WorldMechanicsSnapshot(
+                "world", "STONE", "COBWEB", "AIR", Set.of("COBWEB"),
+                false, false, false, true, true, java.util.List.of(), 0.6);
+
+        assertFalse(web.hasAlternativeMovementSurface());
+        assertTrue(web.inCobweb());
     }
 
     @Test
@@ -121,7 +203,7 @@ class MovementPhysicsTest {
                 "CRAFTING", 0,
                 effects, fullAttributes, enchantments,
                 new WorldMechanicsSnapshot("world", "STONE", "AIR", "AIR",
-                        Set.of(), false, false, false, false, true),
+                        Set.of(), false, false, false, false, true, java.util.List.of(), 0.6),
                 -1, -1, -1, -1, -1
         );
     }
