@@ -3,6 +3,7 @@ package dev.keenac.check;
 import dev.keenac.KeenAC;
 import dev.keenac.mechanics.MechanicsSnapshot;
 import dev.keenac.mechanics.MovementPhysics;
+import dev.keenac.mechanics.MovementSpeedWindow;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -176,6 +177,28 @@ public final class NoWebCheck implements Listener {
 
         double elapsedTicks = getElapsedTicks(state, now);
         double maxHorizontalDistance = getAllowedMoveDistance(toMechanics, elapsedTicks);
+        boolean precisionEnabled = plugin.getConfig().getBoolean(
+                "checks.no-web.precision.enabled", true);
+        boolean setbackEnabled = plugin.getConfig().getBoolean(
+                "checks.no-web.setback.enabled", false);
+        double precisionAllowedSpeedBps = getAllowedMoveDistance(toMechanics, 1.0) * 20.0;
+        boolean precisionSampleEligible = precisionEnabled && toInWeb
+                && !toMechanics.inVehicle() && !toMechanics.inWater()
+                && !toMechanics.swimming() && !toMechanics.usingItem()
+                && toMechanics.pingMs() <= Math.max(0, Math.min(150,
+                        plugin.getConfig().getInt("checks.no-web.precision.maximum-ping-ms", 100)))
+                && toMechanics.tps() >= Math.max(18.0, Math.min(20.0,
+                        plugin.getConfig().getDouble("checks.no-web.precision.minimum-tps", 19.8)))
+                && (toMechanics.damageAgeMs() < 0L || toMechanics.damageAgeMs() >= 750L)
+                && (toMechanics.teleportAgeMs() < 0L || toMechanics.teleportAgeMs() >= 750L)
+                && fromMechanics.sprinting() == toMechanics.sprinting()
+                && fromMechanics.sneaking() == toMechanics.sneaking()
+                && fromMechanics.blocking() == toMechanics.blocking();
+        if (state != null && state.locked && !setbackEnabled) {
+            state.locked = false;
+            state.anchor = null;
+            state.normalMovementSamples = 0;
+        }
         // NoWeb evaluates horizontal displacement only. Vertical movement inside
         // cobweb depends on entry momentum, gravity and potion physics; a fixed
         // vertical cap is too crude and creates false positives for legitimate falls.
@@ -224,8 +247,20 @@ public final class NoWebCheck implements Listener {
         if (!fromInWeb || !toInWeb) {
             if (!fromInWeb && !toInWeb) {
                 if (state == null || state.violationLevel == 0) states.remove(id);
+                if (state != null) {
+                    state.precisionWindow.clear();
+                    state.precisionWindows = 0;
+                }
             } else if (toInWeb) {
                 if (state == null) state = new PlayerState(to, now);
+                state.precisionWindow.clear();
+                state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
+                if (precisionEnabled) {
+                    state.precisionWindow.add(to.getX(), to.getZ(), now,
+                            precisionAllowedSpeedBps, precisionSampleEligible,
+                            plugin.getConfig().getLong("checks.no-web.precision.maximum-sample-gap-ms", 300L));
+                }
                 state.lastSafe = to.clone();
                 states.put(id, state);
             } else {
@@ -233,6 +268,8 @@ public final class NoWebCheck implements Listener {
                     state.locked = false;
                     state.anchor = null;
                     state.normalMovementSamples = 0;
+                    state.precisionWindow.clear();
+                    state.precisionWindows = 0;
                     state.lastSafe = to.clone();
                     states.put(id, state);
                 } else {
@@ -246,7 +283,65 @@ public final class NoWebCheck implements Listener {
             // The first packet after a reset is a baseline, not evidence. This
             // avoids comparing a queued packet to a later server-side location.
             state = new PlayerState(to, now);
+            if (precisionEnabled) {
+                state.precisionWindow.add(to.getX(), to.getZ(), now,
+                        precisionAllowedSpeedBps, precisionSampleEligible,
+                        plugin.getConfig().getLong("checks.no-web.precision.maximum-sample-gap-ms", 300L));
+            }
             states.put(id, state);
+            return;
+        }
+
+        if (!precisionEnabled) {
+            state.precisionWindow.clear();
+            state.precisionWindows = 0;
+            state.lastPrecisionEvaluationNanos = 0L;
+        }
+        if (precisionEnabled) {
+            long maximumGapMillis = Math.max(100L, Math.min(1000L,
+                    plugin.getConfig().getLong("checks.no-web.precision.maximum-sample-gap-ms", 300L)));
+            state.precisionWindow.add(to.getX(), to.getZ(), now,
+                    precisionAllowedSpeedBps, precisionSampleEligible, maximumGapMillis);
+            if (!precisionSampleEligible) {
+                state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
+            }
+            long windowMillis = Math.max(5_000L, Math.min(30_000L,
+                    plugin.getConfig().getLong("checks.no-web.precision.window-ms", 12000L)));
+            long minimumWindowMillis = Math.max(5_000L, Math.min(windowMillis,
+                    plugin.getConfig().getLong("checks.no-web.precision.minimum-window-ms", 10000L)));
+            int minimumSamples = Math.max(40, Math.min(600,
+                    plugin.getConfig().getInt("checks.no-web.precision.minimum-samples", 120)));
+            double multiplier = Math.max(1.0, Math.min(1.02,
+                    plugin.getConfig().getDouble("checks.no-web.precision.multiplier", 1.0005)));
+            double measurementSlack = Math.max(0.0, Math.min(0.10,
+                    plugin.getConfig().getDouble("checks.no-web.precision.measurement-slack", 0.002)));
+            double directionCoherence = Math.max(0.90, Math.min(1.0,
+                    plugin.getConfig().getDouble("checks.no-web.precision.minimum-direction-coherence", 0.995)));
+            long evaluationInterval = Math.max(500L, Math.min(5000L,
+                    plugin.getConfig().getLong("checks.no-web.precision.evaluation-interval-ms", 2000L)))
+                    * 1_000_000L;
+            int requiredWindows = Math.max(1, Math.min(5,
+                    plugin.getConfig().getInt("checks.no-web.precision.confirm-windows", 2)));
+            if (state.lastPrecisionEvaluationNanos == 0L
+                    || now - state.lastPrecisionEvaluationNanos >= evaluationInterval) {
+                state.lastPrecisionEvaluationNanos = now;
+                MovementSpeedWindow.Evaluation precision = state.precisionWindow.evaluate(
+                        now, windowMillis * 1_000_000L, minimumWindowMillis * 1_000_000L,
+                        minimumSamples, multiplier, measurementSlack, directionCoherence);
+                if (!precision.ready()) {
+                    state.precisionWindows = 0;
+                } else if (precision.exceeded()) {
+                    state.precisionWindows++;
+                } else {
+                    state.precisionWindows = 0;
+                }
+                if (state.precisionWindows >= requiredWindows) {
+                    state.precisionWindows = 0;
+                    countViolation(player, state);
+                }
+            }
+            state.lastSafe = to.clone();
             return;
         }
 
@@ -263,7 +358,7 @@ public final class NoWebCheck implements Listener {
             if (state.consecutiveExcessTicks >= requiredSamples) {
                 state.consecutiveExcessTicks = 0;
                 countViolation(player, state);
-                if (state.violationLevel >= 2) {
+                if (state.violationLevel >= 2 && setbackEnabled) {
                     state.locked = true;
                     state.anchor = state.lastSafe == null ? from.clone() : state.lastSafe.clone();
                     returnToAnchor(player, to, state);
@@ -547,6 +642,9 @@ public final class NoWebCheck implements Listener {
         private int consecutiveExcessTicks;
         private int normalMovementSamples;
         private boolean locked;
+        private final MovementSpeedWindow precisionWindow = new MovementSpeedWindow();
+        private int precisionWindows;
+        private long lastPrecisionEvaluationNanos;
 
         private PlayerState(Location initialLocation, long initialMovementNanos) {
             this.lastSafe = initialLocation.clone();

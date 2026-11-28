@@ -8,6 +8,7 @@ import dev.keenac.mechanics.MovementPhysics;
 import dev.keenac.mechanics.MovementInput;
 import dev.keenac.mechanics.MovementState;
 import dev.keenac.mechanics.MovementPhysicsSimulator;
+import dev.keenac.mechanics.MovementSpeedWindow;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -88,6 +89,18 @@ public final class MotionCheck implements Listener {
     private volatile int motionSpeedConfirmSamples = 3;
     private volatile long motionSpeedWindowNanos = 500_000_000L;
     private volatile long motionSpeedMinimumWindowNanos = 350_000_000L;
+    private volatile boolean precisionSpeedEnabled = true;
+    private volatile long precisionSpeedWindowNanos = 12_000_000_000L;
+    private volatile long precisionSpeedMinimumWindowNanos = 10_000_000_000L;
+    private volatile int precisionSpeedMinimumSamples = 120;
+    private volatile double precisionSpeedMultiplier = 1.0005;
+    private volatile double precisionSpeedSlack = 0.002;
+    private volatile double precisionSpeedMinimumCoherence = 0.995;
+    private volatile long precisionSpeedMaximumGapMillis = 300L;
+    private volatile int precisionSpeedMaximumPing = 100;
+    private volatile double precisionSpeedMinimumTps = 19.8;
+    private volatile int precisionSpeedConfirmWindows = 2;
+    private volatile long precisionSpeedEvaluationNanos = 2_000_000_000L;
     private volatile int motionPacketMaxPing = 250;
     private volatile long motionPacketCooldownNanos = 400_000_000L;
     private volatile long motionHoverConfirmNanos = 600_000_000L;
@@ -419,6 +432,34 @@ public final class MotionCheck implements Listener {
         motionSpeedWindowNanos = sampleWindowMs * 1_000_000L;
         motionSpeedMinimumWindowNanos = Math.max(250_000_000L,
                 motionSpeedWindowNanos * 2L / 3L);
+        precisionSpeedEnabled = plugin.getConfig().getBoolean(
+                "checks.motion.precision.enabled", true);
+        precisionSpeedWindowNanos = Math.max(5_000L, Math.min(30_000L,
+                plugin.getConfig().getLong("checks.motion.precision.window-ms", 12000L)))
+                * 1_000_000L;
+        precisionSpeedMinimumWindowNanos = Math.max(5_000L, Math.min(
+                precisionSpeedWindowNanos / 1_000_000L,
+                plugin.getConfig().getLong("checks.motion.precision.minimum-window-ms", 10000L)))
+                * 1_000_000L;
+        precisionSpeedMinimumSamples = Math.max(40, Math.min(600,
+                plugin.getConfig().getInt("checks.motion.precision.minimum-samples", 120)));
+        precisionSpeedMultiplier = Math.max(1.0, Math.min(1.02,
+                plugin.getConfig().getDouble("checks.motion.precision.multiplier", 1.0005)));
+        precisionSpeedSlack = Math.max(0.0, Math.min(0.10,
+                plugin.getConfig().getDouble("checks.motion.precision.measurement-slack", 0.002)));
+        precisionSpeedMinimumCoherence = Math.max(0.90, Math.min(1.0,
+                plugin.getConfig().getDouble("checks.motion.precision.minimum-direction-coherence", 0.995)));
+        precisionSpeedMaximumGapMillis = Math.max(100L, Math.min(1000L,
+                plugin.getConfig().getLong("checks.motion.precision.maximum-sample-gap-ms", 300L)));
+        precisionSpeedMaximumPing = Math.max(0, Math.min(150,
+                plugin.getConfig().getInt("checks.motion.precision.maximum-ping-ms", 100)));
+        precisionSpeedMinimumTps = Math.max(18.0, Math.min(20.0,
+                plugin.getConfig().getDouble("checks.motion.precision.minimum-tps", 19.8)));
+        precisionSpeedConfirmWindows = Math.max(1, Math.min(5,
+                plugin.getConfig().getInt("checks.motion.precision.confirm-windows", 2)));
+        precisionSpeedEvaluationNanos = Math.max(500L, Math.min(5000L,
+                plugin.getConfig().getLong("checks.motion.precision.evaluation-interval-ms", 2000L)))
+                * 1_000_000L;
         motionPacketMaxPing = Math.max(50,
                 plugin.getConfig().getInt("checks.motion.max-ping-ms", 250));
         motionPacketCooldownNanos = Math.max(200L,
@@ -493,6 +534,17 @@ public final class MotionCheck implements Listener {
         double airborneMultiplier = mechanics.onGround() ? 1.0 : recentJump ? 1.22 : 1.08;
         double allowedHorizontalBps = movementProfile.normalHorizontalSpeedBps()
                 * surfaceMultiplier * airborneMultiplier;
+        boolean precisionSpeedEligible = precisionSpeedEnabled
+                && stableMovementEligible
+                && mechanics.onGround() && player.isOnGround()
+                && !recentJump && !mechanics.usingItem()
+                && !mechanics.sneaking() && !mechanics.blocking()
+                && ageAllowsPrediction(mechanics.damageAgeMs(), 750L)
+                && ageAllowsPrediction(mechanics.teleportAgeMs(), 750L)
+                && ageAllowsPrediction(mechanics.itemChangeAgeMs(), 500L)
+                && mechanics.pingMs() <= precisionSpeedMaximumPing
+                && mechanics.tps() >= precisionSpeedMinimumTps
+                && Math.abs(surfaceMultiplier - 1.0) <= 1.0E-6;
 
         boolean hoverEligible = stableMovementEligible && !player.isOnGround()
                 && !mechanics.hasPotionEffect("jump_boost");
@@ -511,6 +563,7 @@ public final class MotionCheck implements Listener {
         motionPacketProfiles.put(id, new MotionPacketProfile(
                 enabled && movementModeEligible,
                 stableMovementEligible,
+                precisionSpeedEligible,
                 hoverEligible,
                 player.getPing(),
                 allowedHorizontalBps,
@@ -583,6 +636,12 @@ public final class MotionCheck implements Listener {
                     state, profile, movementInputs.get(id), x, y, z,
                     packetOnGround, nowNanos, elapsedNanos);
             state.positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
+            state.precisionWindow.add(x, z, nowNanos, profile.allowedHorizontalBps,
+                    profile.precisionSpeedEligible, precisionSpeedMaximumGapMillis);
+            if (!profile.precisionSpeedEligible) {
+                state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
+            }
             state.lastPacketNanos = nowNanos;
             state.lastX = x;
             state.lastY = y;
@@ -627,6 +686,30 @@ public final class MotionCheck implements Listener {
                 }
             } else if (!profile.speedEligible) {
                 state.fastSamples = 0;
+            }
+
+            if (reason == null && precisionSpeedEnabled
+                    && profile.precisionSpeedEligible
+                    && (state.lastPrecisionEvaluationNanos == 0L
+                    || nowNanos - state.lastPrecisionEvaluationNanos >= precisionSpeedEvaluationNanos)) {
+                state.lastPrecisionEvaluationNanos = nowNanos;
+                MovementSpeedWindow.Evaluation precision = state.precisionWindow.evaluate(
+                        nowNanos, precisionSpeedWindowNanos, precisionSpeedMinimumWindowNanos,
+                        precisionSpeedMinimumSamples, precisionSpeedMultiplier,
+                        precisionSpeedSlack, precisionSpeedMinimumCoherence);
+                if (!precision.ready()) {
+                    state.precisionWindows = 0;
+                } else if (precision.exceeded()) {
+                    state.precisionWindows++;
+                } else {
+                    state.precisionWindows = 0;
+                }
+                if (state.precisionWindows >= precisionSpeedConfirmWindows
+                        && nowNanos - state.lastSpeedSignalNanos >= motionPacketCooldownNanos) {
+                    state.precisionWindows = 0;
+                    state.lastSpeedSignalNanos = nowNanos;
+                    reason = "horizontal-speed-strafe";
+                }
             }
 
             if (reason == null && predictionReason != null) {
@@ -773,6 +856,7 @@ public final class MotionCheck implements Listener {
     private record MotionPacketProfile(
             boolean eligible,
             boolean speedEligible,
+            boolean precisionSpeedEligible,
             boolean hoverEligible,
             int ping,
             double allowedHorizontalBps,
@@ -789,6 +873,7 @@ public final class MotionCheck implements Listener {
 
     private static final class MotionPacketState {
         private final Deque<MotionPositionSample> positions = new ArrayDeque<>();
+        private final MovementSpeedWindow precisionWindow = new MovementSpeedWindow();
         private long lastPacketNanos;
         private long lastSpeedSignalNanos;
         private long lastHoverSignalNanos;
@@ -805,10 +890,15 @@ public final class MotionCheck implements Listener {
         private long lastPredictionSignalNanos;
         private int predictionSamples;
         private int fastSamples;
+        private int precisionWindows;
+        private long lastPrecisionEvaluationNanos;
 
         private void reset(double x, double y, double z, long nowNanos,
                            boolean onGround, float fallbackYaw) {
             positions.clear();
+            precisionWindow.clear();
+            precisionWindows = 0;
+            lastPrecisionEvaluationNanos = 0L;
             positions.addLast(new MotionPositionSample(x, y, z, nowNanos));
             lastPacketNanos = nowNanos;
             lastX = x;

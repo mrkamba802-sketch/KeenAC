@@ -79,12 +79,28 @@ checks:
     # varies with entry momentum, gravity and potion physics.
     # Effective allowance accounts for attributes, potions, sprint, sneak, shield,
     # Weaving and walk speed.
-    max-move-distance: 0.062
-    movement-buffer: 0.002
-    # A wider tolerance reduces sensitivity to legitimate packet timing and movement variation.
-    speed-multiplier: 1.06
-    # Require sustained horizontal excess over several server ticks before adding violation level.
+    max-move-distance: 0.054
+    movement-buffer: 0.0
+    # Long-window precision mode ignores individual packet spikes.
+    speed-multiplier: 1.0
     required-samples: 4
+    precision:
+      enabled: true
+      window-ms: 12000
+      minimum-window-ms: 10000
+      minimum-samples: 120
+      # Sensitive to sustained speed above the modeled web allowance by about 0.1%.
+      multiplier: 1.0005
+      measurement-slack: 0.002
+      minimum-direction-coherence: 0.995
+      maximum-sample-gap-ms: 300
+      maximum-ping-ms: 100
+      minimum-tps: 19.8
+      confirm-windows: 2
+      evaluation-interval-ms: 2000
+    # NoWeb is advisory only: never teleport or lock a player.
+    setback:
+      enabled: false
     # Ignore short server-applied impulses such as knockback while re-baselining.
     velocity-grace-ms: 500
     # Ignore NoWeb during Elytra flight and briefly after a glide transition.
@@ -155,10 +171,9 @@ checks:
       vertical-tolerance: 0.015
       velocity-tolerance: 0.035
       confirm-ticks: 12
-    # On a confirmed Motion violation, rubberband to the latest valid jump/ground point.
-    # The shared movement-setback settings add the millimetre offset and short correction lock.
+    # Motion detection is advisory only: it never rubberbands or freezes players.
     setback:
-      enabled: true
+      enabled: false
       # Only use a jump origin saved recently (milliseconds).
       jump-origin-max-age-ms: 3000
       # Maximum age of the last grounded rollback point when no recent jump exists.
@@ -170,6 +185,19 @@ checks:
       buffer-bps: 0.04
       confirm-samples: 3
       sample-window-ms: 500
+    precision:
+      enabled: true
+      window-ms: 12000
+      minimum-window-ms: 10000
+      minimum-samples: 120
+      multiplier: 1.0005
+      measurement-slack: 0.002
+      minimum-direction-coherence: 0.995
+      maximum-sample-gap-ms: 300
+      maximum-ping-ms: 100
+      minimum-tps: 19.8
+      confirm-windows: 2
+      evaluation-interval-ms: 2000
     # Minimum interval between independent packet anomaly signals, not alert delivery.
     packet-signal-interval-ms: 400
     # Log potion effects, effective movement attribute, velocity and movement states to console.
