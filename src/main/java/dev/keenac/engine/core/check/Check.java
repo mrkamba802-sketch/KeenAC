@@ -15,6 +15,8 @@ public abstract class Check {
     protected volatile double decay;
     protected volatile int maxVl;
     protected volatile int setbackVl;
+    private final double defaultDecay;
+    private final int defaultSetbackVl;
     protected volatile int minVersion;
     protected volatile int maxVersion;
     protected final CompatFlag[] compatFlags;
@@ -28,8 +30,10 @@ public abstract class Check {
                 "Check " + getClass().getSimpleName() + " is missing @CheckData annotation");
         name = data.name();
         stableKey = data.stableKey();
-        decay = data.decay();
-        setbackVl = data.setbackVl();
+        defaultDecay = data.decay();
+        defaultSetbackVl = data.setbackVl();
+        decay = defaultDecay;
+        setbackVl = defaultSetbackVl;
         minVersion = data.minVersion();
         maxVersion = data.maxVersion();
         compatFlags = data.compat();
@@ -41,10 +45,8 @@ public abstract class Check {
         enabled = config.isCheckEnabled(stableKey);
         maxVl = config.getCheckMaxVl(stableKey);
         punishable = config.isCheckPunishable(stableKey);
-        Integer explicitSetback = config.getExplicitCheckSetbackVl(stableKey);
-        if (explicitSetback != null) setbackVl = explicitSetback;
-        Double explicitDecay = config.getExplicitCheckDecay(stableKey);
-        if (explicitDecay != null) decay = explicitDecay;
+        setbackVl = config.getCheckSetbackVl(stableKey, defaultSetbackVl);
+        decay = config.getCheckDecay(stableKey, defaultDecay);
     }
     public abstract void onPacketReceive(TrackedPlayer player, PacketReceiveEvent event);
     public abstract void onPacketSend(TrackedPlayer player, PacketSendEvent event);
@@ -114,6 +116,8 @@ public abstract class Check {
     public void setMaxVl(int maxVl) { this.maxVl = maxVl; }
     public int getSetbackVl() { return setbackVl; }
     public void setSetbackVl(int setbackVl) { this.setbackVl = setbackVl; }
+    public int getDefaultSetbackVl() { return defaultSetbackVl; }
+    public double getDefaultDecay() { return defaultDecay; }
     public int getMinVersion() { return minVersion; }
     public int getMaxVersion() { return maxVersion; }
     public CompatFlag[] getCompatFlags() { return compatFlags; }
