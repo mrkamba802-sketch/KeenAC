@@ -278,6 +278,16 @@ public class PacketListener extends PacketListenerAbstract {
         if (user == null) return;
         TrackedPlayer existing = playerManager.get(player.getUniqueId());
         if (existing != null) {
+            ClientVersion existingVersion = user.getClientVersion();
+            if (existingVersion != null) {
+                existing.setClientVersion(existingVersion);
+                existing.setProtocolVersion(existingVersion.getProtocolVersion());
+            }
+            GeyserManager existingGeyser = plugin.getGeyserManager();
+            if (existingGeyser != null && existingGeyser.isGeyserPresent()) {
+                BedrockInfo bedrockInfo = existingGeyser.getBedrockInfo(player.getUniqueId());
+                if (bedrockInfo != null) existing.setBedrockInfo(bedrockInfo);
+            }
             checkManager.onPlayerLogin(existing);
             return;
         }
