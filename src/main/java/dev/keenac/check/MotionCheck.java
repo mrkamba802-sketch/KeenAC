@@ -2,6 +2,8 @@ package dev.keenac.check;
 
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import dev.keenac.KeenAC;
+import dev.keenac.mechanics.MechanicsSnapshot;
+import dev.keenac.mechanics.MovementPhysics;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -419,54 +421,30 @@ public final class MotionCheck implements Listener {
         boolean recentVelocity = plugin.getPlayerContextManager()
                 .isWithinVelocityGrace(id, System.nanoTime(), velocityGrace);
 
-        boolean unsupportedSurface = isUnsupportedMovementSurface(location)
-                || isUnsupportedMovementSurface(location.clone().subtract(0.0, 0.7, 0.0));
+        MechanicsSnapshot mechanics = plugin.getMechanicsEngine().capture(player, location);
+        boolean unsupportedSurface = MovementPhysics.hasUnsupportedMovementSurface(mechanics.world());
         double surfaceMultiplier = getSurfaceMovementMultiplier(player, location);
         boolean movementModeEligible = player.isOnline() && player.isValid()
-                && !player.isInsideVehicle() && !player.isFlying() && !player.isGliding()
-                && !player.isSwimming() && !player.isRiptiding()
-                && !player.isInWater()
-                && player.getGameMode() != GameMode.CREATIVE
-                && player.getGameMode() != GameMode.SPECTATOR
-                && player.getOpenInventory().getType() == InventoryType.CRAFTING
-                && !player.hasPotionEffect(PotionEffectType.LEVITATION)
-                && !player.hasPotionEffect(PotionEffectType.SLOW_FALLING)
+                && !mechanics.inVehicle() && !mechanics.flying() && !mechanics.gliding()
+                && !mechanics.swimming() && !mechanics.inWater() && !mechanics.riptiding()
+                && !"CREATIVE".equals(mechanics.gameMode())
+                && !"SPECTATOR".equals(mechanics.gameMode())
+                && "CRAFTING".equals(mechanics.inventoryType())
+                && !mechanics.hasPotionEffect("levitation")
+                && !mechanics.hasPotionEffect("slow_falling")
                 && !unsupportedSurface && !recentVelocity;
 
-        AttributeInstance movementAttribute = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        double base = movementAttribute == null ? 0.1 : Math.max(0.001, movementAttribute.getBaseValue());
-        double value = movementAttribute == null ? base : movementAttribute.getValue();
-        double attributeMultiplier = Math.max(0.5, Math.min(8.0, value / base));
-        PotionEffect speedEffect = player.getPotionEffect(PotionEffectType.SPEED);
-        double potionMultiplier = speedEffect == null ? 1.0
-                : 1.0 + 0.2 * (speedEffect.getAmplifier() + 1);
-        PotionEffect slownessEffect = player.getPotionEffect(PotionEffectType.SLOWNESS);
-        if (slownessEffect != null) {
-            potionMultiplier *= Math.max(0.05,
-                    1.0 - 0.15 * (slownessEffect.getAmplifier() + 1));
-        }
-        double sprintMultiplier = player.isSprinting() ? 1.3 : 1.0;
-        // The attribute value normally contains potion/sprint modifiers already.
-        // The explicit estimate is a fallback for server implementations that do not.
-        double movementMultiplier = Math.max(attributeMultiplier, potionMultiplier * sprintMultiplier);
-        double walkMultiplier = Math.max(0.1, Math.min(5.0, player.getWalkSpeed() / 0.2));
-        var boots = player.getInventory().getBoots();
-        int swiftSneak = boots == null ? 0 : boots.getEnchantmentLevel(Enchantment.SWIFT_SNEAK);
-        double stanceMultiplier = player.isSneaking()
-                ? Math.min(0.75, 0.30 + 0.15 * swiftSneak) : 1.0;
-        if (player.isBlocking()) {
-            stanceMultiplier *= 0.20;
-        }
+        MovementPhysics.Profile movementProfile = plugin.getMechanicsEngine().movementProfile(mechanics);
         long jumpAt = lastJumpAt.getOrDefault(id, 0L);
         boolean recentJump = jumpAt > 0L && now - jumpAt <= 600L;
-        // Sprint-jump gives a legitimate short horizontal impulse even without
-        // a PlayerVelocityEvent. Give only that short window extra headroom.
-        double airborneMultiplier = player.isOnGround() ? 1.0 : recentJump ? 1.22 : 1.08;
-        double allowedHorizontalBps = 4.317 * movementMultiplier * walkMultiplier
-                * stanceMultiplier * surfaceMultiplier * airborneMultiplier;
+        // A short sprint-jump impulse is allowed, but the base speed allowance
+        // now comes from the same mechanics model as NoWeb and NoSlow.
+        double airborneMultiplier = mechanics.onGround() ? 1.0 : recentJump ? 1.22 : 1.08;
+        double allowedHorizontalBps = movementProfile.normalHorizontalSpeedBps()
+                * surfaceMultiplier * airborneMultiplier;
 
         boolean hoverEligible = movementModeEligible && !player.isOnGround()
-                && !player.hasPotionEffect(PotionEffectType.JUMP_BOOST);
+                && !mechanics.hasPotionEffect("jump_boost");
         motionPacketProfiles.put(id, new MotionPacketProfile(
                 enabled && movementModeEligible,
                 hoverEligible,
