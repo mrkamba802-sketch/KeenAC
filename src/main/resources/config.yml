@@ -1,395 +1,310 @@
-# KeenAC core configuration
-# Each check can be tuned independently. Changes apply with /keenac reload.
+# KeenAC configuration
+# All distances are measured in blocks; time values are in seconds or server ticks as noted.
+
+checks:
+  # Shared server-authoritative correction used by Motion and NoSlow.
+  movement-setback:
+    enabled: true
+    # Preserve fractional coordinates and add a tiny offset against attempted movement.
+    micro-offset: 0.002
+    # Briefly reject movement/velocity immediately after a rubberband (milliseconds).
+    correction-lock-ms: 120
+    # Collapse simultaneous flags from multiple movement checks.
+    dedupe-ms: 80
+
+  air-stuck:
+    enabled: true
+    # Faster confirmation while still requiring stable ping and downward velocity.
+    stationary-ticks: 24
+    # Consecutive confirmed samples required before block actions are restricted.
+    confirm-samples: 2
+    movement-tolerance: 0.02
+    velocity-tolerance: 0.18
+    max-ping-ms: 250
+    # Cancel block breaking and placement while a confirmed AirStuck flag is active.
+    # Other actions and movement are not affected.
+    cancel-actions: true
+    shake-player: false
+    shake-strength: 0.0
+    # Briefly pause AirStuck after a valid Ender Pearl throw (server ticks).
+    pearl-grace-ticks: 200
+
+  aura:
+    enabled: true
+    # Repeated attacks from clearly off-angle directions are reviewed.
+    max-angle-degrees: 110.0
+    required-hits: 3
+    window-ms: 1500
+    flag-duration-ms: 900
+    max-distance: 5.0
+
+  wall-hit:
+    enabled: true
+    # Cancel attacks when the target cannot be seen through blocks.
+    cancel-hits: true
+
+  wall-interact:
+    enabled: true
+    # Advisory mode by default: report suspected wall interactions without cancelling them.
+    cancel-actions: false
+    # Only review long-range block interactions to avoid normal close-range clicks.
+    min-check-distance: 5.5
+    # Maximum range for block/entity Line of Sight review.
+    max-distance: 7.0
+
+  no-slow:
+    enabled: true
+    # Consecutive suspicious movement samples required before an alert.
+    required-samples: 5
+    setback:
+      enabled: true
+      # Permit a few small steps; confirm after at least this many samples and
+      # the configured cumulative suspicious displacement (0.10-0.30 blocks).
+      minimum-samples: 2
+      threshold-distance: 0.18
+    # Cancel item consumption after a confirmed violation.
+    cancel-consume: true
+    # Allow NoSlow to interrupt food use after a confirmed violation.
+    # Set false to keep food use uninterrupted while still detecting NoSlow.
+    reset-food: true
+    # Include potion-based movement modifiers and Dolphin's Grace in the allowance.
+    # When false, the check uses the base movement attribute and ignores Dolphin's Grace bonus.
+    potion-effects: true
+    block-friction: true
+
+  no-web:
+    enabled: true
+    # Vanilla cobweb horizontal movement is about 25% of ordinary walking speed.
+    # The check evaluates horizontal displacement only; vertical cobweb movement
+    # varies with entry momentum, gravity and potion physics.
+    # Effective allowance accounts for attributes, potions, sprint, sneak, shield,
+    # Weaving and walk speed.
+    max-move-distance: 0.062
+    movement-buffer: 0.002
+    # A wider tolerance reduces sensitivity to legitimate packet timing and movement variation.
+    speed-multiplier: 1.06
+    # Require sustained horizontal excess over several server ticks before adding violation level.
+    required-samples: 4
+    # Ignore short server-applied impulses such as knockback while re-baselining.
+    velocity-grace-ms: 500
+    # Ignore NoWeb during Elytra flight and briefly after a glide transition.
+    elytra-grace-ms: 2500
+    # Ignore stale/teleport movement samples after an Ender Pearl landing.
+    pearl-grace-ms: 1500
+
+  ghost-menu:
+    enabled: true
+    # Ignore momentum immediately after opening a server-side container.
+    open-grace-ms: 1200
+    # Recheck movement after velocity changes or damage to avoid knockback false positives.
+    velocity-grace-ms: 1000
+    # Require sustained movement faster than an ordinary walk.
+    # The server can reliably confirm container GUIs, but not the open/closed
+    # state of the client-side E inventory from a window-0 click alone.
+    require-sprint: false
+    minimum-horizontal-speed: 2.5
+    required-samples: 4
+    required-duration-ms: 250
+    required-distance: 0.65
+    sample-window-ms: 1200
+    max-ping-ms: 250
+    # Movement is only reviewed while the server-side GUI is actually open.
+    # Violation levels continue across GUI sessions and reset on quit/world change.
+    # Return to the last safe position at x3, following the NoWeb correction model.
+    setback:
+      enabled: true
+    log-context: true
+
+  auto-swap:
+    enabled: true
+    # PacketEvents CLICK_WINDOW / SWAP events, including swaps in open containers.
+    # Hotbar keys (0-8) and offhand key (40) are counted. Alerts are advisory.
+    required-swaps: 8
+    window-ms: 1500
+
+  silent-swap:
+    enabled: true
+    # Require two repeated silent-swap cycles without a matching main-hand swing.
+    # Packet bursts shorter than 4 ms are valid and are not discarded.
+    required-cycles: 2
+    max-cycle-ms: 100
+    # Window-0 inventory SWAP -> attack -> same SWAP restore sequence.
+    inventory-max-cycle-ms: 180
+    observation-window-ms: 1600
+    # Correlate a normal main-hand animation packet before/after the attack.
+    swing-correlation-ms: 140
+    # Delay the review briefly so a same-batch / slightly delayed swing packet can arrive.
+    review-delay-ticks: 3
+    max-ping-ms: 250
+    # Confirmed hotbar and window-0 inventory SWAP/action sequences are tracked; unrelated clicks are excluded.
+    log-context: true
+
+  motion:
+    enabled: true
+    # Five independently sampled anomalies inside this rolling window trigger an alert.
+    required-suspicions: 5
+    suspicion-window-ms: 3000
+    # Motion re-review cadence follows alerts.delay-seconds.
+    # Ignore movement shortly after server-side velocity changes (knockback, explosions, etc.).
+    velocity-grace-ms: 1200
+    # Ignore Motion samples briefly when elytra gliding starts or stops.
+    glide-grace-ms: 3000
+    max-ping-ms: 250
+    hover:
+      # Require a sustained near-stationary vertical position while airborne.
+      vertical-tolerance: 0.015
+      velocity-tolerance: 0.035
+      confirm-ticks: 12
+    # On a confirmed Motion violation, rubberband to the latest valid jump/ground point.
+    # The shared movement-setback settings add the millimetre offset and short correction lock.
+    setback:
+      enabled: true
+      # Only use a jump origin saved recently (milliseconds).
+      jump-origin-max-age-ms: 3000
+      # Maximum age of the last grounded rollback point when no recent jump exists.
+      safe-position-max-age-ms: 15000
+    # PacketEvents horizontal movement analysis against the estimated vanilla speed.
+    # A small excess is reviewed over a smoothed window to reduce packet-jitter noise.
+    speed:
+      multiplier: 1.025
+      buffer-bps: 0.04
+      confirm-samples: 3
+      sample-window-ms: 500
+    # Minimum interval between independent packet anomaly signals, not alert delivery.
+    packet-signal-interval-ms: 400
+    # Log potion effects, effective movement attribute, velocity and movement states to console.
+    log-context: true
+
+  elytra-speed:
+    enabled: true
+    # Maximum allowed averaged 3D flight speed, measured over a 400 ms packet window.
+    max-bps: 45.1
+    # Consecutive over-limit smoothed windows required to confirm a violation.
+    confirm-samples: 2
+    max-ping-ms: 250
+    log-context: true
+    setback:
+      enabled: true
+      # Return to the last grounded position if it is still reasonably recent.
+      safe-position-max-age-ms: 30000
+      # Stop elytra flight and hard-freeze movement after the rollback.
+      freeze-duration-ms: 2500
+
+  baritone:
+    enabled: true
+    # Only review stable, on-ground navigation with a low, steady ping.
+    max-ping-ms: 220
+    # Repeated route-shape analysis window and required matching turn sequence.
+    observation-window-ms: 45000
+    pattern-segments: 4
+    required-repeats: 3
+    # A repeat must keep both turn angle and distance between turns consistent.
+    angle-tolerance-degrees: 10.0
+    segment-distance-tolerance: 0.40
+    minimum-turn-degrees: 25.0
+    maximum-turn-degrees: 155.0
+    minimum-segment-distance: 1.0
+    maximum-segment-distance: 12.0
+    yaw-turn-tolerance-degrees: 28.0
+    # Advisory only: Baritone is not directly identifiable from movement packets.
+    # This check alerts on repeated automated-looking ground-navigation patterns.
+    log-context: true
+  baritone-a:
+    enabled: true
+    # Separate Baritone (A) review: repeated precise camera-to-travel steering.
+    max-ping-ms: 220
+    observation-window-ms: 25000
+    velocity-grace-ms: 1200
+    # Requires multiple independent direction changes with closely correlated yaw.
+    required-turns: 8
+    # Additional matched turns required before the next escalation.
+    alert-step: 4
+    minimum-turn-degrees: 18.0
+    maximum-turn-degrees: 150.0
+    minimum-segment-distance: 0.65
+    maximum-segment-distance: 10.0
+    yaw-turn-tolerance-degrees: 12.0
+    maximum-average-yaw-error-degrees: 8.0
+    # Rotation-snap-density signal: repeated horizontal yaw steps with stable pitch.
+    rotation-snap-required-count: 7
+    rotation-snap-min-yaw-degrees: 12.0
+    rotation-snap-max-yaw-degrees: 150.0
+    rotation-snap-max-pitch-degrees: 0.75
+    rotation-snap-max-average-pitch-degrees: 0.45
+    rotation-snap-min-travel-distance: 4.0
+    # Advisory only: this is a movement-pattern signal, not proof of a named client.
+    log-context: true
+
+  scaffold:
+    enabled: true
+    # Advisory placement consistency review only; no actions are cancelled.
+    threshold: 5
+    violation-decay: 0.05
+    max-ping-ms: 250
+
+  aim:
+    enabled: true
+    # Aim is advisory: it alerts staff and never cancels an attack by itself.
+    observation-window-ms: 8000
+    # Review repeated accurate attacks against targets that are actually moving.
+    accurate-angle-degrees: 3.5
+    very-accurate-angle-degrees: 1.4
+    minimum-target-speed: 0.08
+    required-moving-hits: 8
+    # Rotation approach and consistency are supporting signals, never standalone flags.
+    required-smooth-approaches: 4
+    stable-angle-deviation: 0.65
+    # Skip unreliable samples during high-latency play.
+    max-ping-ms: 250
+
+  reach:
+    enabled: true
+    # Base survival reach. Ping adds a small bounded tolerance; it never disables this check.
+    base-distance: 3.10
+    # The target hitbox is rewound by attacker ping, up to this maximum.
+    max-rewind-ms: 500
+    # Additional reach allowance grows with ping but is capped at max-ping-buffer.
+    ping-buffer-per-ms: 0.002
+    max-ping-buffer: 0.85
+    # Repeated suspicious attack packets are required before alerting/cancelling.
+    required-hits: 3
+    window-ms: 2500
+    cancel-hits: true
+
+  inv-hit:
+    enabled: true
+    # Cancel attack packets and alert when a player attacks while a server GUI is open.
+    cancel-hits: true
+    # The normal E inventory screen is client-side; detect window-0 clicks and
+    # retain a short best-effort signal for attacks immediately after a click.
+    personal-inventory-click-grace-ms: 650
 
 evidence:
   enabled: true
+  # In-memory history is bounded to protect server memory.
   max-players: 512
   max-per-player: 40
 
 alerts:
   enabled: true
+  # Real-time minimum delay between alerts for the same player and check.
+  # Suppressed one-shot alerts are queued and delivered after this interval.
+  # The x1, x2, x3 sequence advances only when the alert is actually sent.
   delay-seconds: 3
+  # Send alerts to console as well as opted-in staff.
   console: true
+  # Supports legacy & color codes and placeholders:
+  # {prefix}, {player}, {check}, {vl}, {reason}, {ping}, {tps}
+  # Hover over the check name in-game to view player, reason, ping, TPS and VL.
   format: "{prefix} &f{player} &7failed &c{check} &8(x{vl})"
   prefix: "&bKeenAC &8»"
+
+  # Automatically enable alert reception for players with keenac.alerts permission.
   auto-enable-for-staff: true
 
 commands:
+  # Permission nodes are also declared in plugin.yml.
   use-permission: "keenac.use"
   alerts-permission: "keenac.alerts"
   reload-permission: "keenac.reload"
   review-permission: "keenac.review"
-
-checks:
-  # Used only when a check does not define its own value below.
-  default:
-    enabled: true
-    max-vl: 100
-    setback-vl: 20
-    decay: 0.02
-    punishable: false
-  keenac:
-    combat:
-      aim:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.01
-        punishable: false
-      autoclicker:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      backtrack:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      criticals:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.01
-        punishable: false
-      crystal:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      fastheal:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      hitboxes:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      interactcursor:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      killaura:
-        enabled: true
-        max-vl: 100
-        setback-vl: 25
-        decay: 0.005
-        punishable: false
-      macro:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      multiinteract:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      reach:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.05
-        punishable: false
-      selfinteract:
-        enabled: true
-        max-vl: 100
-        setback-vl: 5
-        decay: 0
-        punishable: false
-      swordblock:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.015
-        punishable: false
-    inventory:
-      inventory:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.02
-        punishable: false
-    movement:
-      airliquidbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      airliquidplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      baritone:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      elytra:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      farbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      farplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      fastbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.02
-        punishable: false
-      fly:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      gravity:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.02
-        punishable: false
-      groundspoof:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      illegalmove:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.4
-        punishable: false
-      invalidbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      invalidplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      invalidplacecursor:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      motion:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      multibreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      multiplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      nofall:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      noslow:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      noswing:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      sprint:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      phase:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      positionbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      positionplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      rotationbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.02
-        punishable: false
-      rotationplace:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      scaffold:
-        enabled: true
-        max-vl: 100
-        setback-vl: 30
-        decay: 0.005
-        punishable: false
-      scaffoldsupport:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-      simulation:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      speed:
-        enabled: true
-        max-vl: 100
-        setback-vl: 20
-        decay: 0.01
-        punishable: false
-      step:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      timer:
-        enabled: true
-        max-vl: 100
-        setback-vl: 25
-        decay: 0.005
-        punishable: false
-      velocity:
-        enabled: true
-        max-vl: 100
-        setback-vl: 30
-        decay: 0.01
-        punishable: false
-      wrongbreak:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0.02
-        punishable: false
-    packet:
-      bad:
-        enabled: true
-        max-vl: 100
-        setback-vl: 5
-        decay: 0
-        punishable: false
-      chat:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      cheststealer:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      brand:
-        enabled: true
-        max-vl: 100
-        setback-vl: 10
-        decay: 0
-        punishable: false
-      crash:
-        enabled: true
-        max-vl: 100
-        setback-vl: 5
-        decay: 0
-        punishable: false
-      creative:
-        enabled: true
-        max-vl: 100
-        setback-vl: 5
-        decay: 0
-        punishable: false
-      exploit:
-        enabled: true
-        max-vl: 100
-        setback-vl: 5
-        decay: 0
-        punishable: false
-      order:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      sprint:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false
-      transaction:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.005
-        punishable: false
-      vehicle:
-        enabled: true
-        max-vl: 100
-        setback-vl: 15
-        decay: 0.01
-        punishable: false

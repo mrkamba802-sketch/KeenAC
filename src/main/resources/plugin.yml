@@ -3,7 +3,7 @@ version: '${version}'
 main: dev.keenac.KeenAC
 api-version: '1.21'
 authors: [MrKamba, Its_Ronex]
-description: KeenAC modular detection engine with player/world tracking and latency compensation.
+description: KeenAC movement diagnostics and checks powered by PacketEvents.
 depend: [packetevents]
 commands:
   keenac:

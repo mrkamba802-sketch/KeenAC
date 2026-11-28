@@ -1,32 +1,58 @@
-# KeenAC 1.0.0
+# KeenAC
 
-KeenAC includes 60 combat, movement, packet and inventory checks backed by shared player/world state, version-aware movement models and latency compensation.
+AirStuck detection for Paper and Purpur powered by PacketEvents.
 
-## Core detection architecture
+## Dependencies
 
-- **Player tracking:** one per-player state model tracks positions, velocities, ground state, actions, attributes and potion effects.
-- **World tracking:** compensated block/entity snapshots, world transitions, ghost-block resolution and deferred changes keep checks aligned with the server timeline.
-- **Latency compensation:** modern Ping/Pong transaction probes estimate RTT and one-way delay; bounded history is used for target and world rewind.
-- **Version mechanics:** physics and attribute snapshots are selected for the connected protocol and server version, including movement, Elytra, sprint, mining and reach-related attributes.
-- **Compatibility:** protocol, server-fork, plugin and Bedrock compatibility gates can disable checks where the engine cannot make a reliable comparison.
+- PacketEvents 2.x is a required server plugin (hard dependency).
+- Gradle compiles against PacketEvents Spigot module 2.14.0 with `compileOnly`; PacketEvents is not shaded into KeenAC.
+- Install PacketEvents separately in the server's `plugins` folder before KeenAC.
 
-All detections are sent through KeenAC's existing alert and evidence services. Automatic punishments and setback teleports are disabled in this integration. The engine is not capable of guaranteeing zero false positives; production thresholds still require monitoring and tuning on the target server.
+## Compatibility
 
-## Core commands
+- Compiled against the Paper 1.21.4 API and Java 21 bytecode.
+- Intended for Paper / Purpur 1.21.4 and newer, with PacketEvents 2.x supporting the target protocol versions.
+- Use the Java runtime required by your server version.
 
-- `/keenac alerts` — toggle staff notifications.
-- `/keenac review <player>` — review recent evidence and player context.
-- `/keenac reload` — reload check enablement and per-check settings.
+## Build
 
-## Configuration
+Run `gradle test` to execute the regression tests, or `gradle build` with JDK 21 to run tests and build the plugin. The plugin JAR is written to `build/libs/KeenAC-1.2.2.jar`.
 
-Core notifications and evidence remain in `config.yml` under `alerts` and `evidence`. Individual checks have independent enablement, max-VL, punishment (forced off) and optional decay/setback thresholds under `checks.keenac`. Shared check defaults are under `checks.default`. Additional engine settings include latency, adaptive thresholds, Bedrock compatibility and check behavior.
+GitHub Actions builds the JAR on each push and publishes it as a workflow artifact.
 
-## Compatibility and build
+## Detection
 
-- Paper / Purpur 1.21.4+.
-- Java 21.
-- PacketEvents 2.14.x is required.
-- Run `gradle test` or `gradle build` with JDK 21. Output: `build/libs/KeenAC-1.0.0.jar`.
+AirStuck position samples are decoded from incoming client movement packets through PacketEvents. Bukkit's main thread evaluates server-side collision support and advances the stationary-in-air counter. Client-provided on-ground flags are not trusted as proof of support.
 
-Folia is explicitly detected and this build disables itself safely rather than reading Bukkit state from unsupported scheduler contexts.
+Detection resets on movement, landing, teleportation, world changes, and exempt movement states. A suspected player has common gameplay interactions cancelled until the suspicion clears.
+
+Alerts use the configured format and a shared real-time cooldown per player and check. The default format displays the escalation as `x1`, `x2`, `x3`, and so on.
+
+Operators are not exempt from checks. The `keenac.alerts` permission controls who receives alerts; it does not bypass detection.
+
+
+## Evidence and staff review
+
+Every check signal is recorded with the check name, violation level, reason, and a shared player-context snapshot (ping, TPS, world/position, velocity, movement state, active potion effects, and the age of the last observed teleport and velocity event). The bounded in-memory history is configured under `evidence`; defaults are 512 tracked players and 40 records per player. History is not persisted across server restarts. Set `evidence.enabled: false` to disable recording.
+
+Staff with `keenac.review` can inspect the latest records using `/keenac review <player>`. The permission defaults to operators and can be changed with `commands.review-permission`. Alert notifications can be disabled independently; evidence recording remains active while the plugin is enabled.
+
+The `checks.no-slow.potion-effects` option controls whether potion-driven movement attribute changes and Dolphin's Grace are included in the NoSlow movement allowance. When disabled, the check uses the base movement attribute and does not apply the Dolphin's Grace bonus.
+
+## Baritone movement review
+
+KeenAC includes two alert-only Baritone movement-pattern reviews. The original `checks.baritone` looks for recurring route motifs; `checks.baritone-a` reviews repeated, closely correlated camera and travel-direction turns without requiring the same route to repeat. Both use server-thread eligibility snapshots, ignore unstable movement contexts, and send findings through the evidence and staff-alert systems. They are advisory signals and do not identify a specific client with certainty.
+
+## Motion diagnostics
+
+The Motion module exposes `KeenAC#getMotionCheck().recordSuspicion(player, reason)`
+for trusted movement-analysis components to submit diagnostic signals. Five
+signals by default inside the configured rolling window start a staff review; further
+signals refresh the review window. Console diagnostics include active potion
+effects, the effective movement-speed attribute, walk/fly speed settings,
+recent velocity events, and movement states such as flying, gliding, swimming,
+riptiding, and vehicles.
+
+This module is intentionally advisory: it does not calculate movement
+violations on its own and never teleports, freezes, or otherwise restricts a
+player. Signals must be supplied by another component.

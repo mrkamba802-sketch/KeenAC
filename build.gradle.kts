@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "dev.keenac"
-version = "1.0.0"
+version = "1.2.2"
 
 repositories {
     mavenCentral()
@@ -14,6 +14,10 @@ repositories {
     maven {
         name = "codemc-releases"
         url = uri("https://repo.codemc.io/repository/maven-releases/")
+    }
+    maven {
+        name = "codemc-snapshots"
+        url = uri("https://repo.codemc.io/repository/maven-snapshots/")
     }
 }
 

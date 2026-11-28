@@ -1,0 +1,123 @@
+package dev.keenac.check;
+
+import dev.keenac.KeenAC;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.inventory.InventoryType;
+
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Detects attacks while a server-side container is open, plus attacks shortly
+ * after a server-observed click in the client-side player inventory (window 0).
+ *
+ * The vanilla E screen has no dependable "opened" notification to the server;
+ * player-inventory detection therefore remains a bounded best-effort signal.
+ */
+public final class InvHitCheck implements Listener {
+    private static final long DEFAULT_PERSONAL_CLICK_GRACE_MILLIS = 650L;
+
+    private final KeenAC plugin;
+    private final Set<UUID> openContainerViews = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Long> recentPersonalInventoryActivity = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> violationLevels = new ConcurrentHashMap<>();
+
+    public InvHitCheck(KeenAC plugin) {
+        this.plugin = plugin;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (!(event.getPlayer() instanceof Player player)
+                || event.getView().getType() == InventoryType.CRAFTING) {
+            return;
+        }
+
+        UUID id = player.getUniqueId();
+        openContainerViews.add(id);
+        recentPersonalInventoryActivity.remove(id);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClose(InventoryCloseEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        openContainerViews.remove(id);
+        recentPersonalInventoryActivity.remove(id);
+    }
+
+    /**
+     * Called directly from PacketEvents for a client click on window 0.
+     * Only concurrent data is touched here; no Bukkit entity or inventory calls.
+     */
+    public void recordPersonalInventoryPacket(UUID playerId) {
+        if (playerId != null
+                && plugin.getConfig().getBoolean("checks.inv-hit.enabled", true)) {
+            rememberPersonalInventoryActivity(playerId);
+        }
+    }
+
+    private void rememberPersonalInventoryActivity(UUID playerId) {
+        long graceMillis = Math.max(100L,
+                plugin.getConfig().getLong("checks.inv-hit.personal-inventory-click-grace-ms",
+                        DEFAULT_PERSONAL_CLICK_GRACE_MILLIS));
+        recentPersonalInventoryActivity.put(playerId,
+                System.nanoTime() + graceMillis * 1_000_000L);
+    }
+
+    public boolean isInventoryOpen(UUID playerId) {
+        if (openContainerViews.contains(playerId)) {
+            return true;
+        }
+
+        Long until = recentPersonalInventoryActivity.get(playerId);
+        if (until == null) {
+            return false;
+        }
+        if (System.nanoTime() <= until) {
+            return true;
+        }
+        recentPersonalInventoryActivity.remove(playerId, until);
+        return false;
+    }
+
+    public boolean shouldCancelHits() {
+        return plugin.getConfig().getBoolean("checks.inv-hit.cancel-hits", true);
+    }
+
+    public void reportViolation(Player player) {
+        if (player == null || !player.isOnline()
+                || !plugin.getConfig().getBoolean("checks.inv-hit.enabled", true)) {
+            return;
+        }
+
+        UUID id = player.getUniqueId();
+        int violationLevel = violationLevels.merge(id, 1, Integer::sum);
+        plugin.getAlertManager().send("InvHit", player, violationLevel,
+                "An attack was attempted while a server-side inventory or container screen was open.");
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        clear(event.getPlayer().getUniqueId());
+    }
+
+    private void clear(UUID id) {
+        openContainerViews.remove(id);
+        recentPersonalInventoryActivity.remove(id);
+        violationLevels.remove(id);
+    }
+
+    public void clearAll() {
+        openContainerViews.clear();
+        recentPersonalInventoryActivity.clear();
+        violationLevels.clear();
+    }
+}
