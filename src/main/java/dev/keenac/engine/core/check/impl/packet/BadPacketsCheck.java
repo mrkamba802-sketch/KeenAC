@@ -180,9 +180,8 @@ public class BadPacketsCheck extends Check implements PacketCheck {
             flagDetail(player, "NaN/Infinite rotation");
             return;
         }
-        if (yaw < -180.0f || yaw > 180.0f) {
-            flagDetail(player, "Yaw out of range: " + yaw);
-        }
+        // Yaw is a cyclic angle and clients may send values outside [-180, 180].
+        // Only pitch has a meaningful finite gameplay range here.
         if (pitch < -90.0f || pitch > 90.0f) {
             flagDetail(player, "Pitch out of range: " + pitch);
         }
