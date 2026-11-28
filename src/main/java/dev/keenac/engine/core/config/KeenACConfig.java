@@ -305,14 +305,20 @@ public class KeenACConfig {
         return config.getInt("checks.default.max-vl", 100);
     }
     public int getCheckSetbackVl(String checkKey) {
+        return getCheckSetbackVl(checkKey, config.getInt("checks.default.setback-vl", 20));
+    }
+    public int getCheckSetbackVl(String checkKey, int fallback) {
         Integer explicit = getExplicitCheckSetbackVl(checkKey);
-        if (explicit != null) return explicit;
-        return config.getInt("checks.default.setback-vl", 20);
+        return explicit != null ? Math.max(0, explicit) : Math.max(0, fallback);
     }
     public double getCheckDecay(String checkKey) {
+        return getCheckDecay(checkKey, config.getDouble("checks.default.decay", 0.02));
+    }
+    public double getCheckDecay(String checkKey, double fallback) {
         Double explicit = getExplicitCheckDecay(checkKey);
-        if (explicit != null) return explicit;
-        return config.getDouble("checks.default.decay", 0.02);
+        if (explicit == null) return Math.max(0.0, fallback);
+        double value = explicit;
+        return Double.isFinite(value) && value >= 0.0 ? value : Math.max(0.0, fallback);
     }
     public Integer getExplicitCheckSetbackVl(String checkKey) {
         String path = "checks." + checkKey + ".setback-vl";
@@ -333,7 +339,7 @@ public class KeenACConfig {
         if (config.isSet(path)) {
             return config.getBoolean(path);
         }
-        return config.getBoolean("checks.default.punishable", true);
+        return config.getBoolean("checks.default.punishable", false);
     }
     public Set<String> getCheckKeys() {
         if (config.isConfigurationSection("checks")) {
