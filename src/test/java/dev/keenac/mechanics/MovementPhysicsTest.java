@@ -234,6 +234,17 @@ class MovementPhysicsTest {
     }
 
     @Test
+    void baselineCobwebAllowanceMatchesQuarterOfOrdinaryWalkingSpeed() {
+        MechanicsSnapshot ordinary = snapshot(Map.of(), Map.of(), Map.of(),
+                false, false, 0.2, new MechanicsSnapshot.AttributeState(0.1, 0.1));
+        double budget = MovementPhysics.allowedCobwebDistance(
+                ordinary, MovementPhysics.profile(ordinary, 100, 64.0), 1.0,
+                0.054, 0.0, 1.0);
+
+        assertEquals(0.054, budget, 1.0E-9);
+    }
+
+    @Test
     void cobwebAllowanceScalesWithLegitimatePotionAndWeavingMechanics() {
         MechanicsSnapshot ordinary = snapshot(Map.of(), Map.of(), Map.of(),
                 false, false, 0.2, new MechanicsSnapshot.AttributeState(0.1, 0.1));

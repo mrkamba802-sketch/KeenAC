@@ -79,7 +79,7 @@ checks:
     # varies with entry momentum, gravity and potion physics.
     # Effective allowance accounts for attributes, potions, sprint, sneak, shield,
     # Weaving and walk speed.
-    max-move-distance: 0.062
+    max-move-distance: 0.054
     movement-buffer: 0.0
     # Long-window precision mode ignores individual packet spikes.
     speed-multiplier: 1.0
