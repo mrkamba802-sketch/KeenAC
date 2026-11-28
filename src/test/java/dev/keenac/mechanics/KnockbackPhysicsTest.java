@@ -22,12 +22,14 @@ class KnockbackPhysicsTest {
                 Double.NaN, 0.4, 0.0, now - 100_000_000L);
         KnockbackPhysics.Impulse negativeClock = new KnockbackPhysics.Impulse(
                 0.35, 0.42, -0.10, -800_000_000L);
+        KnockbackPhysics.Impulse future = new KnockbackPhysics.Impulse(
+                0.35, 0.42, -0.10, now + 1L);
 
         assertTrue(KnockbackPhysics.isRecentImpulse(recent, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(old, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(weak, now, 1200L, 0.06));
         assertFalse(KnockbackPhysics.isRecentImpulse(invalid, now, 1200L, 0.06));
-        assertFalse(KnockbackPhysics.isRecentImpulse(recent, now - 1L, 1200L, 0.06));
+        assertFalse(KnockbackPhysics.isRecentImpulse(future, now, 1200L, 0.06));
         assertTrue(KnockbackPhysics.isRecentImpulse(
                 negativeClock, -500_000_000L, 1200L, 0.06));
     }
