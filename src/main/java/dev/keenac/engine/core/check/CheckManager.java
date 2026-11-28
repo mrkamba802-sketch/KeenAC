@@ -148,6 +148,15 @@ public final class CheckManager {
         }
     }
 
+    /** Initializes per-player checks after PacketEvents has established the session. */
+    public void onPlayerLogin(TrackedPlayer player) {
+        if (player == null) return;
+        Check check = byKey.get("keenac.packet.bad");
+        if (check instanceof BadPacketsCheck badPacketsCheck) {
+            badPacketsCheck.onLoginComplete(player);
+        }
+    }
+
     public void onTransactionResponse(TrackedPlayer player, boolean matched) {
         Check check = byKey.get("keenac.packet.transaction");
         if (check instanceof TransactionCheck transactionCheck) {
