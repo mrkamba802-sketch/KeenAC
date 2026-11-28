@@ -15,7 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 @CheckData(name = "Speed A", stableKey = "keenac.movement.speed", decay = 0.01, setbackVl = 20, compat = {CompatFlag.RELAX_ON_MISMATCH}, relaxMultiplier = 1.5)
 public class SpeedCheck extends Check implements PacketCheck {
-    private static final double SPEED_TOLERANCE = 1.05;
+    private static final double SPEED_TOLERANCE = 1.15;
     private static final double SPEED_TOLERANCE_UNCONFIRMED = 1.20;
     private static final double PRE_1_18_2_THRESHOLD = 0.03;
     private static final double MIN_SPEED_FLAG_BUFFER = 3.0;
@@ -33,6 +33,28 @@ public class SpeedCheck extends Check implements PacketCheck {
     @Override
     public void onPacketReceive(TrackedPlayer player, PacketReceiveEvent event) {
         if (!PredictionEngine.isMovementPacket(event)) return;
+
+        var bukkitPlayer = player.getPlayer();
+        if (bukkitPlayer == null || !bukkitPlayer.isOnline()
+                || bukkitPlayer.isInsideVehicle()
+                || player.isFlying()
+                || player.isCachedIsFallFlying()
+                || player.isCachedHasRiptide()) {
+            decreaseBuffer(player, 0.25);
+            return;
+        }
+
+        var contextManager = KeenAC.getInstance().getPlayerContextManager();
+        if (contextManager != null) {
+            long teleportAge = contextManager.teleportAgeMillis(player.getUuid());
+            if ((teleportAge >= 0L && teleportAge < 1_000L)
+                    || contextManager.isWithinVelocityGrace(
+                            player.getUuid(), System.nanoTime(), 750L)) {
+                decreaseBuffer(player, 0.25);
+                return;
+            }
+        }
+
         ActionData actionData = player.getActionData();
         if (actionData.hasRecentPistonUpdate(5)) {
             decreaseBuffer(player, 0.5);
@@ -42,6 +64,7 @@ public class SpeedCheck extends Check implements PacketCheck {
             decreaseBuffer(player, 0.3);
             return;
         }
+
         PredictionContext ctx = new PredictionContext(player);
         double actualSpeed = ctx.horizontalSpeed;
         PlayerState state = getState(player);
@@ -56,21 +79,26 @@ public class SpeedCheck extends Check implements PacketCheck {
             decreaseBuffer(player, 0.05);
             return;
         }
+
         double maxSpeed = ctx.predictedMaxHorizontalSpeed;
+        if (!Double.isFinite(maxSpeed) || maxSpeed < 0.02) {
+            decreaseBuffer(player, 0.1);
+            return;
+        }
+
         SimulationEngine simEngine = KeenAC.getInstance().getSimulationEngine();
         boolean unconfirmedChanges = simEngine != null && simEngine.needsSimulation(player);
         double tolerance = unconfirmedChanges ? SPEED_TOLERANCE_UNCONFIRMED : SPEED_TOLERANCE;
-        if (actualSpeed > maxSpeed * tolerance) {
-            double exceedRatio = actualSpeed / Math.max(maxSpeed, 0.001);
-            if (exceedRatio > 2.0) {
+        double exceedRatio = actualSpeed / maxSpeed;
+        if (exceedRatio > tolerance) {
+            // Even extreme single samples can be caused by stale state or packet bursts.
+            // Require repeated evidence instead of issuing an immediate violation.
+            double bufferIncrease = exceedRatio > 1.75
+                    ? 1.0 : 0.5 * (exceedRatio - 1.0);
+            increaseBuffer(player, bufferIncrease);
+            if (getBuffer(player) > MIN_SPEED_FLAG_BUFFER) {
                 flag(player);
                 resetBuffer(player);
-            } else {
-                increaseBuffer(player, 0.5 * (exceedRatio - 1.0));
-                if (getBuffer(player) > MIN_SPEED_FLAG_BUFFER) {
-                    flag(player);
-                    resetBuffer(player);
-                }
             }
         } else {
             decreaseBuffer(player, 0.1);
