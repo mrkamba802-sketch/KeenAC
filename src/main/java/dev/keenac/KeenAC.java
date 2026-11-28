@@ -129,9 +129,14 @@ public final class KeenAC extends JavaPlugin {
     }
 
     private void ensureTracked(Player player) {
-        if (playerManager == null || playerManager.get(player.getUniqueId()) != null) return;
-        var user = PacketEvents.getAPI().getPlayerManager().getUser(player);
-        playerManager.add(new TrackedPlayer(player, user));
+        if (playerManager == null) return;
+        TrackedPlayer tracked = playerManager.get(player.getUniqueId());
+        if (tracked == null) {
+            var user = PacketEvents.getAPI().getPlayerManager().getUser(player);
+            tracked = new TrackedPlayer(player, user);
+            playerManager.add(tracked);
+        }
+        if (checkManager != null) checkManager.onPlayerLogin(tracked);
     }
 
     public AlertManager getAlertManager() { return alertManager; }
