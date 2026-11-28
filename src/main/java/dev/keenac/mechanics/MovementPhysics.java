@@ -110,6 +110,7 @@ public final class MovementPhysics {
         Profile profile = profile(snapshot, potionLevelCap, attributeMultiplierCap);
         double movementMultiplier = includePotionEffects
                 ? profile.movementWithoutSprint() : 1.0;
+        movementMultiplier *= profile.walkSpeedMultiplier() * profile.stanceMultiplier();
         return allowedItemUseSpeed(
                 inWaterOverride || snapshot.inWater(),
                 snapshot.hasPotionEffect("dolphins_grace"),

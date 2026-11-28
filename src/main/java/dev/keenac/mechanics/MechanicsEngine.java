@@ -232,7 +232,7 @@ public final class MechanicsEngine implements Listener {
         BoundingBox liveBox = player.getBoundingBox();
         double halfX = Math.max(0.15, liveBox.getWidthX() * 0.5);
         double halfZ = Math.max(0.15, liveBox.getWidthZ() * 0.5);
-        double height = Math.max(1.0, Math.min(3.0, liveBox.getWidthY()));
+        double height = Math.max(1.0, Math.min(3.0, (liveBox.getMaxY() - liveBox.getMinY())));
 
         int minX = floor(location.getX() - halfX + 0.001);
         int maxX = floor(location.getX() + halfX - 0.001);

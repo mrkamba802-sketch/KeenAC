@@ -52,6 +52,25 @@ class MovementPhysicsTest {
     }
 
     @Test
+    void itemUseBudgetHonorsWalkSpeedAndSwiftSneak() {
+        MechanicsSnapshot defaultWalk = snapshot(Map.of(), Map.of(), Map.of(),
+                false, false, 0.2, new MechanicsSnapshot.AttributeState(0.1, 0.1));
+        MechanicsSnapshot fastWalk = snapshot(Map.of(), Map.of(), Map.of(),
+                false, false, 0.4, new MechanicsSnapshot.AttributeState(0.1, 0.1));
+        MechanicsSnapshot sneaking = snapshot(Map.of(), Map.of(),
+                Map.of("leggings:swift_sneak", 3), true, false, 0.2,
+                new MechanicsSnapshot.AttributeState(0.1, 0.1));
+
+        double baseline = MovementPhysics.allowedItemUseSpeed(defaultWalk, false, 100, 64.0);
+        double fast = MovementPhysics.allowedItemUseSpeed(fastWalk, false, 100, 64.0);
+        double sneakingBudget = MovementPhysics.allowedItemUseSpeed(sneaking, false, 100, 64.0);
+
+        assertEquals(baseline * 2.0, fast, 1.0E-9);
+        assertTrue(sneakingBudget > 0.0);
+        assertTrue(sneakingBudget < baseline);
+    }
+
+    @Test
     void alternativeBlocksAreMarkedAsUnsuitableForSimpleMovementPrediction() {
         WorldMechanicsSnapshot world = new WorldMechanicsSnapshot(
                 "world", "ICE", "AIR", "AIR", Set.of("ICE"),
