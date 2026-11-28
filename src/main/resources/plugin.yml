@@ -3,7 +3,8 @@ version: '${version}'
 main: dev.keenac.KeenAC
 api-version: '1.21'
 authors: [MrKamba, Its_Ronex]
-description: KeenAC staff alerts and evidence framework.
+description: KeenAC AirStuck detection, staff alerts and evidence framework.
+depend: [packetevents]
 commands:
   keenac:
     description: KeenAC administration commands

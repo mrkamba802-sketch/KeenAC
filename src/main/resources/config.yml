@@ -1,6 +1,21 @@
 # KeenAC configuration
 # Detection checks are intentionally removed while the alert and evidence foundation is retained.
 
+checks:
+  air-stuck:
+    enabled: true
+    # Number of position packets with unchanged Y and no physical support before a flag.
+    stationary-ticks: 8
+    # How long missing flying packets are tolerated before Blink/Freeze is reviewed.
+    blink-timeout-ms: 1000
+    setback:
+      # First two confirmed packet freezes return the player to their last known position.
+      # The third repeated freeze reports an alert instead of another correction.
+      enabled: true
+      confirmations: 3
+      exempt-ticks: 3
+
+
 evidence:
   enabled: true
   # In-memory history is bounded to protect server memory.
