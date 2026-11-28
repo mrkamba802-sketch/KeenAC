@@ -222,7 +222,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
             }
 
             if (!data.hasLastPos
-                    || data.exemptTicks > 0
+                    || now < data.freezeCheckExemptUntil
                     || player.isInsideVehicle()
                     || isPlayerExempt(player)
                     || now - data.lastFlyingTime <= blinkTimeoutMs) {
@@ -243,6 +243,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
             data.freezePenalty += 2;
             data.lastFlyingTime = now;
             data.exemptTicks = exemptTicksAfterSetback;
+            data.freezeCheckExemptUntil = now + Math.max(150L, exemptTicksAfterSetback * 50L);
 
             if (data.freezePenalty >= setbackConfirmations * 2) {
                 flag(player, data.freezePenalty * 10,
@@ -280,6 +281,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
                 data.stuckTicks = 0;
                 data.hasLastPos = false;
                 data.exemptTicks = Math.max(data.exemptTicks, 4);
+                data.freezeCheckExemptUntil = now + 1_000L;
                 return;
             }
             case TELEPORT_CONFIRM -> {
@@ -290,6 +292,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
                     data.freezePenalty = 0;
                     data.hasLastPos = false;
                     data.exemptTicks = 4;
+                    data.freezeCheckExemptUntil = now + 500L;
                     data.lastFlyingTime = now;
                 }
                 return;
@@ -298,6 +301,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
                 data.stuckTicks = 0;
                 data.lastDeltaY = 0.0;
                 data.exemptTicks = Math.max(data.exemptTicks, 10);
+                data.freezeCheckExemptUntil = now + 500L;
                 data.lastFlyingTime = now;
                 return;
             }
@@ -306,6 +310,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
                 data.freezePenalty = 0;
                 data.hasLastPos = false;
                 data.exemptTicks = 5;
+                data.freezeCheckExemptUntil = now + 500L;
                 data.lastFlyingTime = now;
                 return;
             }
@@ -405,6 +410,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
         data.lastDeltaY = 0.0;
         data.hasLastPos = false;
         data.exemptTicks = exemptTicks;
+        data.freezeCheckExemptUntil = now + 500L;
         data.lastFlyingTime = now;
         data.pendingServerTeleports = 0;
     }
@@ -416,6 +422,8 @@ public final class AirStuckCheck extends PacketListenerAbstract {
                 || player.getAllowFlight()
                 || player.isFlying()
                 || player.isGliding()
+                || player.isInWater()
+                || player.isInLava()
                 || player.isRiptiding()
                 || player.isSleeping()
                 || player.isDead()
@@ -580,6 +588,7 @@ public final class AirStuckCheck extends PacketListenerAbstract {
         private int exemptTicks;
         private int pendingServerTeleports;
         private long lastFlyingTime;
+        private long freezeCheckExemptUntil;
         private boolean hasLastPos;
 
         private PlayerMovementData(Player player) {
