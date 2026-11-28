@@ -694,9 +694,11 @@ public final class MotionCheck implements Listener {
                         nowNanos, precisionSpeedWindowNanos, precisionSpeedMinimumWindowNanos,
                         precisionSpeedMinimumSamples, precisionSpeedMultiplier,
                         precisionSpeedSlack, precisionSpeedMinimumCoherence);
-                if (precision.ready()
-                        && (state.lastPrecisionEvaluationNanos == 0L
-                        || nowNanos - state.lastPrecisionEvaluationNanos >= precisionSpeedEvaluationNanos)) {
+                if (!precision.ready()) {
+                    state.precisionWindows = 0;
+                    state.lastPrecisionEvaluationNanos = 0L;
+                } else if (state.lastPrecisionEvaluationNanos == 0L
+                        || nowNanos - state.lastPrecisionEvaluationNanos >= precisionSpeedEvaluationNanos) {
                     state.lastPrecisionEvaluationNanos = nowNanos;
                     if (precision.exceeded()) {
                         state.precisionWindows++;

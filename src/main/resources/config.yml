@@ -171,8 +171,6 @@ checks:
       vertical-tolerance: 0.015
       velocity-tolerance: 0.035
       confirm-ticks: 12
-    # On a confirmed Motion violation, rubberband to the latest valid jump/ground point.
-    # The shared movement-setback settings add the millimetre offset and short correction lock.
     # Motion detection is advisory only: it never rubberbands or freezes players.
     setback:
       enabled: false

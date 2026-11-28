@@ -255,6 +255,7 @@ public final class NoWebCheck implements Listener {
                 if (state == null) state = new PlayerState(to, now);
                 state.precisionWindow.clear();
                 state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
                 if (precisionEnabled) {
                     state.precisionWindow.add(to.getX(), to.getZ(), now,
                             precisionAllowedSpeedBps, precisionSampleEligible,
@@ -291,6 +292,11 @@ public final class NoWebCheck implements Listener {
             return;
         }
 
+        if (!precisionEnabled) {
+            state.precisionWindow.clear();
+            state.precisionWindows = 0;
+            state.lastPrecisionEvaluationNanos = 0L;
+        }
         if (precisionEnabled) {
             long maximumGapMillis = Math.max(100L, Math.min(1000L,
                     plugin.getConfig().getLong("checks.no-web.precision.maximum-sample-gap-ms", 300L)));
@@ -316,9 +322,11 @@ public final class NoWebCheck implements Listener {
                     * 1_000_000L;
             int requiredWindows = Math.max(1, Math.min(5,
                     plugin.getConfig().getInt("checks.no-web.precision.confirm-windows", 2)));
-            if (precision.ready()
-                    && (state.lastPrecisionEvaluationNanos == 0L
-                    || now - state.lastPrecisionEvaluationNanos >= evaluationInterval)) {
+            if (!precision.ready()) {
+                state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
+            } else if (state.lastPrecisionEvaluationNanos == 0L
+                    || now - state.lastPrecisionEvaluationNanos >= evaluationInterval) {
                 state.lastPrecisionEvaluationNanos = now;
                 if (precision.exceeded()) {
                     state.precisionWindows++;

@@ -28,7 +28,7 @@ public final class MovementSpeedWindow {
         if (!eligible || !Double.isFinite(x) || !Double.isFinite(z)
                 || !Double.isFinite(allowedHorizontalSpeedBps)
                 || allowedHorizontalSpeedBps <= 0.0
-                || timestampNanos <= 0L || maximumSampleGapMillis <= 0L) {
+                || maximumSampleGapMillis <= 0L) {
             clear();
             return;
         }
@@ -56,7 +56,7 @@ public final class MovementSpeedWindow {
             double measurementSlackBlocks,
             double minimumDirectionCoherence
     ) {
-        if (nowNanos <= 0L || windowNanos <= 0L || minimumWindowNanos <= 0L
+        if (windowNanos <= 0L || minimumWindowNanos <= 0L
                 || minimumWindowNanos > windowNanos || minimumSamples < 2
                 || !Double.isFinite(multiplier) || multiplier < 1.0
                 || !Double.isFinite(measurementSlackBlocks) || measurementSlackBlocks < 0.0
@@ -65,11 +65,15 @@ public final class MovementSpeedWindow {
             return Evaluation.notReady();
         }
 
-        long cutoff = nowNanos - windowNanos;
         while (samples.size() > 2) {
             Sample second = secondSample();
-            if (second == null || second.timestampNanos() > cutoff) break;
-            samples.removeFirst();
+            if (second == null) break;
+            long sampleAgeNanos = nowNanos - second.timestampNanos();
+            if (sampleAgeNanos >= 0L && sampleAgeNanos > windowNanos) {
+                samples.removeFirst();
+            } else {
+                break;
+            }
         }
 
         if (samples.size() < minimumSamples) return Evaluation.notReady();
