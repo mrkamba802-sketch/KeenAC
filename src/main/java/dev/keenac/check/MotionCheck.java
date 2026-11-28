@@ -689,28 +689,26 @@ public final class MotionCheck implements Listener {
             }
 
             if (reason == null && precisionSpeedEnabled
-                    && profile.precisionSpeedEligible) {
+                    && profile.precisionSpeedEligible
+                    && (state.lastPrecisionEvaluationNanos == 0L
+                    || nowNanos - state.lastPrecisionEvaluationNanos >= precisionSpeedEvaluationNanos)) {
+                state.lastPrecisionEvaluationNanos = nowNanos;
                 MovementSpeedWindow.Evaluation precision = state.precisionWindow.evaluate(
                         nowNanos, precisionSpeedWindowNanos, precisionSpeedMinimumWindowNanos,
                         precisionSpeedMinimumSamples, precisionSpeedMultiplier,
                         precisionSpeedSlack, precisionSpeedMinimumCoherence);
                 if (!precision.ready()) {
                     state.precisionWindows = 0;
-                    state.lastPrecisionEvaluationNanos = 0L;
-                } else if (state.lastPrecisionEvaluationNanos == 0L
-                        || nowNanos - state.lastPrecisionEvaluationNanos >= precisionSpeedEvaluationNanos) {
-                    state.lastPrecisionEvaluationNanos = nowNanos;
-                    if (precision.exceeded()) {
-                        state.precisionWindows++;
-                    } else {
-                        state.precisionWindows = 0;
-                    }
-                    if (state.precisionWindows >= precisionSpeedConfirmWindows
-                            && nowNanos - state.lastSpeedSignalNanos >= motionPacketCooldownNanos) {
-                        state.precisionWindows = 0;
-                        state.lastSpeedSignalNanos = nowNanos;
-                        reason = "horizontal-speed-strafe";
-                    }
+                } else if (precision.exceeded()) {
+                    state.precisionWindows++;
+                } else {
+                    state.precisionWindows = 0;
+                }
+                if (state.precisionWindows >= precisionSpeedConfirmWindows
+                        && nowNanos - state.lastSpeedSignalNanos >= motionPacketCooldownNanos) {
+                    state.precisionWindows = 0;
+                    state.lastSpeedSignalNanos = nowNanos;
+                    reason = "horizontal-speed-strafe";
                 }
             }
 

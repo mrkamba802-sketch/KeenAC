@@ -302,6 +302,10 @@ public final class NoWebCheck implements Listener {
                     plugin.getConfig().getLong("checks.no-web.precision.maximum-sample-gap-ms", 300L)));
             state.precisionWindow.add(to.getX(), to.getZ(), now,
                     precisionAllowedSpeedBps, precisionSampleEligible, maximumGapMillis);
+            if (!precisionSampleEligible) {
+                state.precisionWindows = 0;
+                state.lastPrecisionEvaluationNanos = 0L;
+            }
             long windowMillis = Math.max(5_000L, Math.min(30_000L,
                     plugin.getConfig().getLong("checks.no-web.precision.window-ms", 12000L)));
             long minimumWindowMillis = Math.max(5_000L, Math.min(windowMillis,
@@ -314,21 +318,20 @@ public final class NoWebCheck implements Listener {
                     plugin.getConfig().getDouble("checks.no-web.precision.measurement-slack", 0.002)));
             double directionCoherence = Math.max(0.90, Math.min(1.0,
                     plugin.getConfig().getDouble("checks.no-web.precision.minimum-direction-coherence", 0.995)));
-            MovementSpeedWindow.Evaluation precision = state.precisionWindow.evaluate(
-                    now, windowMillis * 1_000_000L, minimumWindowMillis * 1_000_000L,
-                    minimumSamples, multiplier, measurementSlack, directionCoherence);
             long evaluationInterval = Math.max(500L, Math.min(5000L,
                     plugin.getConfig().getLong("checks.no-web.precision.evaluation-interval-ms", 2000L)))
                     * 1_000_000L;
             int requiredWindows = Math.max(1, Math.min(5,
                     plugin.getConfig().getInt("checks.no-web.precision.confirm-windows", 2)));
-            if (!precision.ready()) {
-                state.precisionWindows = 0;
-                state.lastPrecisionEvaluationNanos = 0L;
-            } else if (state.lastPrecisionEvaluationNanos == 0L
+            if (state.lastPrecisionEvaluationNanos == 0L
                     || now - state.lastPrecisionEvaluationNanos >= evaluationInterval) {
                 state.lastPrecisionEvaluationNanos = now;
-                if (precision.exceeded()) {
+                MovementSpeedWindow.Evaluation precision = state.precisionWindow.evaluate(
+                        now, windowMillis * 1_000_000L, minimumWindowMillis * 1_000_000L,
+                        minimumSamples, multiplier, measurementSlack, directionCoherence);
+                if (!precision.ready()) {
+                    state.precisionWindows = 0;
+                } else if (precision.exceeded()) {
                     state.precisionWindows++;
                 } else {
                     state.precisionWindows = 0;
