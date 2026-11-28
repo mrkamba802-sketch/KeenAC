@@ -128,21 +128,9 @@ public class BadPacketsCheck extends Check implements PacketCheck {
     }
     private void handleRotation(TrackedPlayer player, PacketReceiveEvent event, PlayerState state) {
         WrapperPlayClientPlayerRotation wrapper = new WrapperPlayClientPlayerRotation(event);
-        float yaw = wrapper.getYaw();
-        float pitch = wrapper.getPitch();
-        validateRotation(player, yaw, pitch);
-        if (player.getHorizontalSpeed() > 0.15 && !player.isOnGround()) {
-            double dx = player.getX() - player.getLastX();
-            double dz = player.getZ() - player.getLastZ();
-            double horizontalMovement = Math.sqrt(dx * dx + dz * dz);
-            if (horizontalMovement > 0.5) {
-                increaseBuffer(player, 0.2);
-                if (getBuffer(player) > 2.0) {
-                    flagDetail(player, "rotation-only during fast movement, position desync");
-                    resetBuffer(player);
-                }
-            }
-        }
+        validateRotation(player, wrapper.getYaw(), wrapper.getPitch());
+        // Rotation-only packets are valid while moving. The protocol does not require
+        // a position update in every look packet, so movement delta is not evidence of desync.
     }
     private void handleFlying(TrackedPlayer player, PacketReceiveEvent event) {
         WrapperPlayClientPlayerFlying wrapper = new WrapperPlayClientPlayerFlying(event);
